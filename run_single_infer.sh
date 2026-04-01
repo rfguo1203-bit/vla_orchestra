@@ -16,17 +16,17 @@ if [[ -z "${REPO_PATH}" ]]; then
 fi
 
 MODEL_PATH="${MODEL_PATH:-${REPO_PATH}/weight/RLinf-Pi05-SFT}"
-OUTPUT_DIR="${OUTPUT_DIR:-${REPO_PATH}/outputs}"
+OUTPUT_DIR="${OUTPUT_DIR:-${SCRIPT_DIR}/outputs}"
 CONFIG_NAME="libero_10_ppo_openpi_pi05"
 NUM_EPISODES=1
 SAVE_FRACTION=1.0
 SEED=""
 SHUFFLE="false"
-VLM_CHECK_INTERVAL=1
-VLM_API_URL="http://api.hap.hisi.huawei.com/hap-gateway/api/v1/chat/completions"
-VLM_API_KEY="b9c6d05e-05e0-4d50-a439-a677a211025b"
-VLM_X_AUTH_TOKEN="bmKJ-XI9A6KihqixSzr1p-AaqBWjrZ3o-fe7D9HeTuNzxy_neEm5vplmKLiyMqiJU42IqikaUoaLeC0LpYIqW_RhfrYM6CGFuvHjd9oRq5t8OQ4Li6eiK34pYToY_c6G_Mr6HqlnP7dc-dVplRNh6sDgRzR7QBhkV_Z5dOTMGdlpZOlCBNGTXNQt1Pg3O3n8HM8L4L4hnKUEp2NvlfYPkaWi6mvFqJHuBntFN1jvH50AU0wxqzOr6H9fon3Y-lheUrkQw8y0utloFCQb-44W7JQfwVAIZxewh7jFHp0QfMLcN0r86zmW084izs_V0K43SbnPf8CWCtCHo_zmhr3mog"
-VLM_MODEL="kimi_k2.5"
+VLM_CHECK_INTERVAL=10
+VLM_API_URL="${VLM_API_URL:-http://127.0.0.1:8972/v1/chat/completions}"
+VLM_API_KEY="${VLM_API_KEY:-}"
+VLM_X_AUTH_TOKEN="${VLM_X_AUTH_TOKEN:-}"
+VLM_MODEL="${VLM_MODEL:-Qwen3.5-27B}"
 VLM_PROMPT='You are judging whether a robot manipulation task is already complete from a single camera image. Reply with strict JSON only: {"terminate": true/false, "reason": "short reason"}. Set terminate=true only when the task goal is clearly finished in the image.'
 VLM_TIMEOUT=30
 

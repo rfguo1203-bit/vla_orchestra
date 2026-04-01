@@ -367,14 +367,14 @@ def _parse_vlm_decision(response_payload: dict[str, Any]) -> dict[str, Any]:
 
 def _query_vlm_termination(
     api_url: str,
-    api_key: str,
+    api_key: str | None,
     x_auth_token: str | None,
     model_name: str,
     prompt: str,
     image: Any,
     timeout: float,
 ) -> dict[str, Any]:
-    """Call an OpenAI-compatible VLM endpoint and return the termination decision."""
+    """Call the local OpenAI-compatible VLM endpoint and return the termination decision."""
     image_data_url = _encode_image_to_data_url(image)
     request_body = {
         "model": model_name,
@@ -382,22 +382,23 @@ def _query_vlm_termination(
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": image_data_url}},
+                    {"type": "text", "text": prompt},
                 ],
             }
         ],
         "stream": False,
-        "response_format": {"type": "json_object"},
+        "max_tokens": 256,
+        "temperature": 0.1,
     }
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     request_bytes = json.dumps(request_body).encode("utf-8")
     request = urllib.request.Request(
         api_url,
         data=request_bytes,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
+        headers=headers,
         method="POST",
     )
     if x_auth_token:
@@ -559,9 +560,9 @@ def run_single_task_eval(
         task_dir=task_slug,
     )
     vlm_enabled = vlm_check_interval > 0
-    if vlm_enabled and (not vlm_api_url or not vlm_api_key or not vlm_model):
+    if vlm_enabled and (not vlm_api_url or not vlm_model):
         raise ValueError(
-            "When vlm_check_interval > 0, vlm_api_url, vlm_api_key, and vlm_model are required."
+            "When vlm_check_interval > 0, vlm_api_url and vlm_model are required."
         )
 
     try:
@@ -776,7 +777,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--vlm-api-key",
         type=str,
         default=None,
-        help="API key used for the VLM endpoint.",
+        help="Optional API key used for the VLM endpoint.",
     )
     parser.add_argument(
         "--vlm-model",
