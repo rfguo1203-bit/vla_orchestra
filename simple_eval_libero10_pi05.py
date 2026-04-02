@@ -74,23 +74,23 @@ REPO_ROOT = _resolve_rlinf_repo_root()
 EMBODIED_PATH = REPO_ROOT / "examples" / "embodiment"
 DEFAULT_CONFIG_NAME = "libero_10_ppo_openpi_pi05"
 DEFAULT_VLM_PROMPT = """
-You are a robot task completion judge, not a controller.
-You will receive:
-- the task description,
-- the current base camera image,
-- a short running summary from earlier checks,
-- a short list of recent history summaries.
+你是一个机器人任务完成状态判定器，不是控制器。
+你会收到：
+- 任务描述，
+- 当前主视角图像，
+- 之前检查得到的一条简短运行状态摘要，
+- 最近几次状态摘要列表。
 
-Your job:
-1. summarize the current image state relevant to the task,
-2. update the task memory into one short state summary for the next check,
-3. decide whether the task is already completed.
+你的任务：
+1. 总结当前图像里与任务相关的状态，
+2. 更新一条供下一次判断使用的简短任务记忆摘要，
+3. 判断任务现在是否已经完成。
 
-Rules:
-- Judge only from the provided image and text context.
-- Output terminate=true only when the task is clearly completed in the current image.
-- If the image is ambiguous, partially complete, occluded, or only near success, do not mark completed.
-- Reply with strict JSON only using this exact schema:
+规则：
+- 只能根据提供的图像和文本上下文进行判断。
+- 只有当任务已经在当前图像中被明确完成时，才能输出 terminate=true。
+- 如果图像存在歧义、被遮挡、只是部分完成、或者只是接近成功，都不能判定为 completed。
+- 只能输出严格 JSON，且必须使用下面这个固定结构：
 {
   "frame_state": {"summary": "..."},
   "task_memory": {"state_summary": "..."},
@@ -100,7 +100,7 @@ Rules:
     "reason": "..."
   }
 }
-- decision.status must be one of: "in_progress", "completed", "uncertain".
+- decision.status 只能是以下三者之一："in_progress"、"completed"、"uncertain"。
 """.strip()
 DEFAULT_VLM_HISTORY_SIZE = 3
 
@@ -541,17 +541,17 @@ def _build_contextual_vlm_prompt(
         f"- {item}" for item in recent_history if isinstance(item, str) and item.strip()
     )
     if not history_text:
-        history_text = "- none"
+        history_text = "- 无"
 
-    running_summary = str(memory.get("running_summary", "")).strip() or "none"
+    running_summary = str(memory.get("running_summary", "")).strip() or "无"
     return (
         f"{base_prompt}\n\n"
-        f"Task: {task_name}\n"
-        "Goal: determine whether this task is already completed in the current image.\n"
-        f"Running summary: {running_summary}\n"
-        "Recent history:\n"
+        f"任务描述：{task_name}\n"
+        "目标：判断这个任务在当前图像中是否已经完成。\n"
+        f"运行中摘要：{running_summary}\n"
+        "最近历史：\n"
         f"{history_text}\n"
-        "Judge based only on the provided base camera image."
+        "只能基于提供的主视角图像做判断。"
     )
 
 
