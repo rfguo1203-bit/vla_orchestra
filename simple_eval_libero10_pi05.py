@@ -27,14 +27,14 @@ from typing import Any
 
 from tqdm.auto import tqdm
 from vlm_eval.io_and_video import (
-    _build_output_session_dir,
-    _extract_base_image,
-    _finalize_output_layout,
-    _get_next_video_index,
-    _predict_video_path,
-    _resolve_seed,
-    _slugify_task_name,
-    _to_bool,
+    build_output_session_dir,
+    extract_base_image,
+    finalize_output_layout,
+    get_next_video_index,
+    predict_video_path,
+    resolve_seed,
+    slugify_task_name,
+    to_bool,
     compute_num_save_videos,
     select_video_indices,
 )
@@ -44,7 +44,7 @@ from vlm_eval.libero_tasking import (
     load_libero10_metadata,
     resolve_task_id,
 )
-from vlm_eval.obs_utils import _standardize_env_obs
+from vlm_eval.obs_utils import standardize_env_obs
 from vlm_eval.paths_and_config import (
     DEFAULT_CONFIG_NAME,
     DEFAULT_VLM_PROMPT,
@@ -52,13 +52,13 @@ from vlm_eval.paths_and_config import (
     load_eval_cfg,
 )
 from vlm_eval.vlm_memory import (
-    _build_contextual_vlm_prompt,
-    _build_failed_task_state,
-    _init_episode_memory,
-    _query_vlm_task_state,
-    _should_terminate_from_task_state,
-    _snapshot_episode_memory,
-    _update_episode_memory,
+    build_contextual_vlm_prompt,
+    build_failed_task_state,
+    init_episode_memory,
+    query_vlm_task_state,
+    should_terminate_from_task_state,
+    snapshot_episode_memory,
+    update_episode_memory,
 )
 
 
@@ -95,9 +95,9 @@ def run_single_task_eval(
             f"task_id must be in [0, {len(task_descriptions) - 1}], got {task_id}"
         )
 
-    resolved_seed = _resolve_seed(seed)
+    resolved_seed = resolve_seed(seed)
     task_name = task_descriptions[task_id]
-    task_slug = _slugify_task_name(task_name)
+    task_slug = slugify_task_name(task_name)
     task_reset_state_ids = build_task_reset_state_ids(
         metadata["cumsum_trial_id_bins"],
         task_id=task_id,
@@ -123,7 +123,7 @@ def run_single_task_eval(
     )
 
     video_base_dir = Path(output_dir or (REPO_ROOT / "results" / "libero10_pi05_single_task"))
-    output_session_dir = _build_output_session_dir(video_base_dir, task_id)
+    output_session_dir = build_output_session_dir(video_base_dir, task_id)
     with open_dict(cfg):
         if model_path is not None:
             cfg.actor.model.model_path = model_path
@@ -154,7 +154,7 @@ def run_single_task_eval(
 
     episode_results: list[dict[str, Any]] = []
     saved_video_paths: list[str] = []
-    next_video_index = _get_next_video_index(output_session_dir)
+    next_video_index = get_next_video_index(output_session_dir)
     vlm_enabled = vlm_check_interval > 0
     if vlm_enabled and (not vlm_api_url or not vlm_model):
         raise ValueError(
@@ -165,9 +165,9 @@ def run_single_task_eval(
         for episode_idx, reset_state_id in enumerate(chosen_reset_state_ids):
             env.is_start = False
             obs, _ = env.reset(reset_state_ids=[reset_state_id])
-            obs = _standardize_env_obs(obs)
+            obs = standardize_env_obs(obs)
 
-            episode_memory = _init_episode_memory()
+            episode_memory = init_episode_memory()
             done = False
             success = False
             episode_steps = 0
@@ -200,11 +200,11 @@ def run_single_task_eval(
                     for chunk_step in range(chunk_actions.shape[1]):
                         action = chunk_actions[:, chunk_step]
                         obs, _reward, terminations, truncations, _infos = env.step(action)
-                        obs = _standardize_env_obs(obs)
+                        obs = standardize_env_obs(obs)
                         episode_steps += 1
                         progress_bar.update(1)
 
-                        truncated = _to_bool(truncations[0])
+                        truncated = to_bool(truncations[0])
                         done = truncated
                         if truncated:
                             termination_source = "truncation"
@@ -216,20 +216,20 @@ def run_single_task_eval(
                             and episode_steps % vlm_check_interval == 0
                         )
                         if should_check_vlm:
-                            base_image = _extract_base_image(obs)
+                            base_image = extract_base_image(obs)
                             if base_image is None:
                                 raise ValueError(
                                     "Contextual VLM check requires obs['main_images'] to exist."
                                 )
-                            memory_before = _snapshot_episode_memory(episode_memory)
-                            task_prompt = _build_contextual_vlm_prompt(
+                            memory_before = snapshot_episode_memory(episode_memory)
+                            task_prompt = build_contextual_vlm_prompt(
                                 base_prompt=vlm_prompt,
                                 task_name=task_name,
                                 memory=memory_before,
                             )
                             error_message = ""
                             try:
-                                vlm_task_state = _query_vlm_task_state(
+                                vlm_task_state = query_vlm_task_state(
                                     api_url=vlm_api_url,
                                     api_key=vlm_api_key,
                                     x_auth_token=vlm_x_auth_token,
@@ -240,9 +240,9 @@ def run_single_task_eval(
                                 )
                             except Exception as exc:
                                 error_message = str(exc)
-                                vlm_task_state = _build_failed_task_state(error_message)
+                                vlm_task_state = build_failed_task_state(error_message)
 
-                            _update_episode_memory(episode_memory, vlm_task_state)
+                            update_episode_memory(episode_memory, vlm_task_state)
                             trace_record = {
                                 "step": episode_steps,
                                 "running_summary_before": memory_before["running_summary"],
@@ -255,7 +255,7 @@ def run_single_task_eval(
                                 "error": error_message,
                             }
                             memory_trace.append(trace_record)
-                            if _should_terminate_from_task_state(vlm_task_state):
+                            if should_terminate_from_task_state(vlm_task_state):
                                 done = True
                                 success = True
                                 termination_source = "vlm"
@@ -268,7 +268,7 @@ def run_single_task_eval(
             video_path = None
             if episode_idx in save_video_indices and isinstance(env, RecordVideo):
                 env.video_cnt = next_video_index
-                video_path = _predict_video_path(
+                video_path = predict_video_path(
                     output_session_dir=output_session_dir,
                     video_idx=env.video_cnt,
                 )
@@ -287,7 +287,7 @@ def run_single_task_eval(
                     "termination_source": termination_source,
                     "termination_reason": termination_reason,
                     "memory_trace": memory_trace,
-                    "episode_memory": _snapshot_episode_memory(episode_memory),
+                    "episode_memory": snapshot_episode_memory(episode_memory),
                     "video_path": str(video_path) if video_path is not None else None,
                 }
             )
@@ -298,7 +298,7 @@ def run_single_task_eval(
                     json.dump(memory_trace, fp, indent=2)
     finally:
         env.close()
-        _finalize_output_layout(
+        finalize_output_layout(
             video_base_dir=video_base_dir,
             output_session_dir=output_session_dir,
             seed=resolved_seed,
@@ -315,7 +315,7 @@ def run_single_task_eval(
     }
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Evaluate Pi0.5 on a single LIBERO-10 task and save videos."
     )
@@ -423,7 +423,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    args = _build_parser().parse_args()
+    args = build_parser().parse_args()
     metadata = load_libero10_metadata()
 
     if args.list_tasks:

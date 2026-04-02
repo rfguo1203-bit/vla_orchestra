@@ -11,7 +11,7 @@ SCRIPT_PATH = Path(__file__).resolve().parent.parent / "simple_eval_libero10_pi0
 WORKSPACE_ROOT = SCRIPT_PATH.parent
 
 
-def _resolve_rlinf_repo_root() -> Path:
+def resolve_rlinf_repo_root() -> Path:
     """Locate the RLinf repository for this standalone wrapper script."""
     candidate_roots = [
         Path(os.environ["RLINF_REPO_PATH"]).expanduser().resolve()
@@ -37,7 +37,7 @@ def _resolve_rlinf_repo_root() -> Path:
     )
 
 
-REPO_ROOT = _resolve_rlinf_repo_root()
+REPO_ROOT = resolve_rlinf_repo_root()
 EMBODIED_PATH = REPO_ROOT / "examples" / "embodiment"
 DEFAULT_CONFIG_NAME = "libero_10_ppo_openpi_pi05"
 DEFAULT_VLM_PROMPT = """
@@ -72,7 +72,7 @@ DEFAULT_VLM_PROMPT = """
 DEFAULT_VLM_HISTORY_SIZE = 3
 
 
-def _set_runtime_env() -> None:
+def set_runtime_env() -> None:
     repo_root_str = str(REPO_ROOT)
     if repo_root_str not in sys.path:
         sys.path.insert(0, repo_root_str)
@@ -87,7 +87,7 @@ def _set_runtime_env() -> None:
 
 def load_eval_cfg(config_name: str, overrides: list[str] | None = None):
     """Compose the embodied eval config through Hydra."""
-    _set_runtime_env()
+    set_runtime_env()
 
     import hydra
     from omegaconf import OmegaConf, open_dict

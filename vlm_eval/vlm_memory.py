@@ -9,11 +9,11 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from .io_and_video import _encode_image_to_data_url
+from .io_and_video import encode_image_to_data_url
 from .paths_and_config import DEFAULT_VLM_HISTORY_SIZE
 
 
-def _extract_vlm_text_content(response_payload: dict[str, Any]) -> str:
+def extract_vlm_text_content(response_payload: dict[str, Any]) -> str:
     """Extract text content from an OpenAI-compatible VLM response."""
     content: Any = None
 
@@ -45,7 +45,7 @@ def _extract_vlm_text_content(response_payload: dict[str, Any]) -> str:
     return content.strip()
 
 
-def _empty_vlm_task_state(
+def empty_vlm_task_state(
     raw_text: str = "",
     parse_ok: bool = False,
 ) -> dict[str, Any]:
@@ -63,14 +63,14 @@ def _empty_vlm_task_state(
     }
 
 
-def _strip_vlm_thinking(text: str) -> str:
+def strip_vlm_thinking(text: str) -> str:
     """Drop hidden reasoning content when the model emits a closing think tag."""
     if "</think>" in text:
         return text.split("</think>")[-1].strip()
     return text.strip()
 
 
-def _extract_last_json_object(text: str) -> dict[str, Any] | None:
+def extract_last_json_object(text: str) -> dict[str, Any] | None:
     """Extract the last valid top-level JSON object from free-form model output."""
     decoder = json.JSONDecoder()
     candidates: list[dict[str, Any]] = []
@@ -86,23 +86,23 @@ def _extract_last_json_object(text: str) -> dict[str, Any] | None:
     return candidates[-1] if candidates else None
 
 
-def _parse_vlm_task_state(response_payload: dict[str, Any]) -> dict[str, Any]:
+def parse_vlm_task_state(response_payload: dict[str, Any]) -> dict[str, Any]:
     """Parse an OpenAI-compatible VLM response into the minimal task-state schema."""
-    content = _extract_vlm_text_content(response_payload)
-    cleaned_content = _strip_vlm_thinking(content)
-    parsed = _extract_last_json_object(cleaned_content)
+    content = extract_vlm_text_content(response_payload)
+    cleaned_content = strip_vlm_thinking(content)
+    parsed = extract_last_json_object(cleaned_content)
     if parsed is None:
-        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+        return empty_vlm_task_state(raw_text=content, parse_ok=False)
 
     frame_state = parsed.get("frame_state")
     task_memory = parsed.get("task_memory")
     decision = parsed.get("decision")
     if not isinstance(frame_state, dict):
-        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+        return empty_vlm_task_state(raw_text=content, parse_ok=False)
     if not isinstance(task_memory, dict):
-        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+        return empty_vlm_task_state(raw_text=content, parse_ok=False)
     if not isinstance(decision, dict):
-        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+        return empty_vlm_task_state(raw_text=content, parse_ok=False)
 
     frame_summary = frame_state.get("summary")
     memory_summary = task_memory.get("state_summary")
@@ -110,17 +110,17 @@ def _parse_vlm_task_state(response_payload: dict[str, Any]) -> dict[str, Any]:
     status = decision.get("status")
     reason = decision.get("reason")
     if not isinstance(frame_summary, str):
-        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+        return empty_vlm_task_state(raw_text=content, parse_ok=False)
     if not isinstance(memory_summary, str):
-        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+        return empty_vlm_task_state(raw_text=content, parse_ok=False)
     if not isinstance(terminate, bool):
-        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+        return empty_vlm_task_state(raw_text=content, parse_ok=False)
     if status not in {"in_progress", "completed", "uncertain"}:
-        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+        return empty_vlm_task_state(raw_text=content, parse_ok=False)
     if not isinstance(reason, str):
-        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+        return empty_vlm_task_state(raw_text=content, parse_ok=False)
 
-    task_state = _empty_vlm_task_state(raw_text=content, parse_ok=True)
+    task_state = empty_vlm_task_state(raw_text=content, parse_ok=True)
     task_state["frame_state"]["summary"] = frame_summary.strip()
     task_state["task_memory"]["state_summary"] = memory_summary.strip()
     task_state["decision"]["terminate"] = terminate
@@ -129,7 +129,7 @@ def _parse_vlm_task_state(response_payload: dict[str, Any]) -> dict[str, Any]:
     return task_state
 
 
-def _init_episode_memory(history_size: int = DEFAULT_VLM_HISTORY_SIZE) -> dict[str, Any]:
+def init_episode_memory(history_size: int = DEFAULT_VLM_HISTORY_SIZE) -> dict[str, Any]:
     """Create the minimal per-episode memory container for contextual VLM state."""
     return {
         "recent_history": [],
@@ -138,7 +138,7 @@ def _init_episode_memory(history_size: int = DEFAULT_VLM_HISTORY_SIZE) -> dict[s
     }
 
 
-def _snapshot_episode_memory(memory: dict[str, Any]) -> dict[str, Any]:
+def snapshot_episode_memory(memory: dict[str, Any]) -> dict[str, Any]:
     """Return a copy of the current episode memory state for logging/debugging."""
     return {
         "recent_history": list(memory.get("recent_history", [])),
@@ -147,7 +147,7 @@ def _snapshot_episode_memory(memory: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _should_terminate_from_task_state(task_state: dict[str, Any]) -> bool:
+def should_terminate_from_task_state(task_state: dict[str, Any]) -> bool:
     """Return whether a parsed task state should trigger early termination."""
     decision = task_state["decision"]
     return (
@@ -157,7 +157,7 @@ def _should_terminate_from_task_state(task_state: dict[str, Any]) -> bool:
     )
 
 
-def _update_episode_memory(memory: dict[str, Any], task_state: dict[str, Any]) -> None:
+def update_episode_memory(memory: dict[str, Any], task_state: dict[str, Any]) -> None:
     """Update episode memory from a parsed task-state response."""
     if not task_state.get("parse_ok", False):
         return
@@ -171,14 +171,14 @@ def _update_episode_memory(memory: dict[str, Any], task_state: dict[str, Any]) -
     memory["running_summary"] = task_state["task_memory"]["state_summary"]
 
 
-def _build_failed_task_state(error_message: str) -> dict[str, Any]:
+def build_failed_task_state(error_message: str) -> dict[str, Any]:
     """Return a non-terminating task-state record for VLM call failures."""
-    task_state = _empty_vlm_task_state(raw_text="", parse_ok=False)
+    task_state = empty_vlm_task_state(raw_text="", parse_ok=False)
     task_state["decision"]["reason"] = error_message.strip()
     return task_state
 
 
-def _build_contextual_vlm_prompt(
+def build_contextual_vlm_prompt(
     base_prompt: str,
     task_name: str,
     memory: dict[str, Any],
@@ -203,7 +203,7 @@ def _build_contextual_vlm_prompt(
     )
 
 
-def _query_vlm_task_state(
+def query_vlm_task_state(
     api_url: str,
     api_key: str | None,
     x_auth_token: str | None,
@@ -213,7 +213,7 @@ def _query_vlm_task_state(
     timeout: float,
 ) -> dict[str, Any]:
     """Call the local OpenAI-compatible VLM endpoint and return the parsed task state."""
-    image_data_url = _encode_image_to_data_url(image)
+    image_data_url = encode_image_to_data_url(image)
     request_body = {
         "model": model_name,
         "messages": [
@@ -265,7 +265,7 @@ def _query_vlm_task_state(
                         f"content_type={response.headers.get('Content-Type')!r}, "
                         f"body_preview={response_preview!r}"
                     ) from exc
-                return _parse_vlm_task_state(response_payload)
+                return parse_vlm_task_state(response_payload)
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(

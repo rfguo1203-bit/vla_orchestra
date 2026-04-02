@@ -39,32 +39,32 @@ def select_video_indices(total_episodes: int, num_save_videos: int) -> list[int]
     return deduped
 
 
-def _to_bool(value: Any) -> bool:
+def to_bool(value: Any) -> bool:
     try:
         return bool(value.item())
     except AttributeError:
         return bool(value)
 
 
-def _slugify_task_name(task_name: str) -> str:
+def slugify_task_name(task_name: str) -> str:
     return "".join(ch.lower() if ch.isalnum() else "_" for ch in task_name).strip("_")
 
 
-def _build_output_session_dir(video_base_dir: Path, task_id: int) -> Path:
+def build_output_session_dir(video_base_dir: Path, task_id: int) -> Path:
     date_str = datetime.now().strftime("%Y%m%d")
     return video_base_dir / f"{date_str}_{task_id}"
 
 
-def _predict_video_path(output_session_dir: Path, video_idx: int) -> Path:
+def predict_video_path(output_session_dir: Path, video_idx: int) -> Path:
     return output_session_dir / f"{video_idx}.mp4"
 
 
-def _resolve_seed(seed: int | None) -> int:
+def resolve_seed(seed: int | None) -> int:
     """Use the provided seed or generate a random one when absent."""
     return seed if seed is not None else secrets.randbelow(2**31)
 
 
-def _get_next_video_index(output_session_dir: Path) -> int:
+def get_next_video_index(output_session_dir: Path) -> int:
     """Return the next non-overlapping MP4 index for the target output directory."""
     if not output_session_dir.exists():
         return 0
@@ -78,7 +78,7 @@ def _get_next_video_index(output_session_dir: Path) -> int:
     return max(existing_indices, default=-1) + 1
 
 
-def _finalize_output_layout(
+def finalize_output_layout(
     video_base_dir: Path,
     output_session_dir: Path,
     seed: int,
@@ -105,7 +105,7 @@ def _finalize_output_layout(
             pass
 
 
-def _extract_base_image(obs: dict[str, Any]) -> Any:
+def extract_base_image(obs: dict[str, Any]) -> Any:
     """Return the first environment's main camera image."""
     main_images = obs.get("main_images")
     if main_images is None:
@@ -116,7 +116,7 @@ def _extract_base_image(obs: dict[str, Any]) -> Any:
         return main_images
 
 
-def _encode_image_to_data_url(image: Any) -> str:
+def encode_image_to_data_url(image: Any) -> str:
     """Encode an observation image into a PNG data URL."""
     from PIL import Image
 

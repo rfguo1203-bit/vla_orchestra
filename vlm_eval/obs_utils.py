@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 
-def _standardize_env_obs(obs: dict[str, Any]) -> dict[str, Any]:
+def standardize_env_obs(obs: dict[str, Any]) -> dict[str, Any]:
     """Match the observation schema produced by the standard eval pipeline.
 
     The official `eval_embodiment.sh` path goes through `EnvOutput.to_dict()`,

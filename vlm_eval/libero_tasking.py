@@ -7,12 +7,12 @@ import re
 from itertools import accumulate
 from typing import Any
 
-from .paths_and_config import _set_runtime_env
+from .paths_and_config import set_runtime_env
 
 
 def load_libero10_metadata(task_suite_name: str = "libero_10") -> dict[str, Any]:
     """Load task descriptions and reset-state ranges from the LIBERO benchmark."""
-    _set_runtime_env()
+    set_runtime_env()
 
     from rlinf.envs.libero.utils import get_benchmark_overridden
 
