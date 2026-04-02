@@ -79,6 +79,7 @@ DEFAULT_VLM_PROMPT = (
     '{"terminate": true/false, "reason": "short reason"}. '
     "Set terminate=true only when the task goal is clearly finished in the image."
 )
+DEFAULT_VLM_HISTORY_SIZE = 3
 
 
 def compute_num_save_videos(total_episodes: int, save_fraction: float) -> int:
@@ -360,8 +361,8 @@ def _encode_image_to_data_url(image: Any) -> str:
     return f"data:image/png;base64,{image_b64}"
 
 
-def _parse_vlm_decision(response_payload: dict[str, Any]) -> dict[str, Any]:
-    """Parse an OpenAI-compatible VLM response into a terminate decision."""
+def _extract_vlm_text_content(response_payload: dict[str, Any]) -> str:
+    """Extract text content from an OpenAI-compatible VLM response."""
     content: Any = None
 
     if isinstance(response_payload.get("output"), list):
@@ -389,7 +390,117 @@ def _parse_vlm_decision(response_payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(content, str) or not content.strip():
         raise ValueError("VLM response did not contain parsable text content.")
 
-    content = content.strip()
+    return content.strip()
+
+
+def _empty_vlm_task_state(
+    raw_text: str = "",
+    parse_ok: bool = False,
+) -> dict[str, Any]:
+    """Return the minimal contextual task-state schema with safe defaults."""
+    return {
+        "frame_state": {"summary": ""},
+        "task_memory": {"state_summary": ""},
+        "decision": {
+            "terminate": False,
+            "status": "uncertain",
+            "reason": "",
+        },
+        "raw_text": raw_text,
+        "parse_ok": parse_ok,
+    }
+
+
+def _parse_vlm_task_state(response_payload: dict[str, Any]) -> dict[str, Any]:
+    """Parse an OpenAI-compatible VLM response into the minimal task-state schema."""
+    content = _extract_vlm_text_content(response_payload)
+    json_match = re.search(r"\{.*\}", content, flags=re.DOTALL)
+    if json_match is None:
+        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+
+    json_text = json_match.group(0)
+    parsed = json.loads(json_text)
+    if not isinstance(parsed, dict):
+        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+
+    frame_state = parsed.get("frame_state")
+    task_memory = parsed.get("task_memory")
+    decision = parsed.get("decision")
+    if not isinstance(frame_state, dict):
+        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+    if not isinstance(task_memory, dict):
+        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+    if not isinstance(decision, dict):
+        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+
+    frame_summary = frame_state.get("summary")
+    memory_summary = task_memory.get("state_summary")
+    terminate = decision.get("terminate")
+    status = decision.get("status")
+    reason = decision.get("reason")
+    if not isinstance(frame_summary, str):
+        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+    if not isinstance(memory_summary, str):
+        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+    if not isinstance(terminate, bool):
+        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+    if status not in {"in_progress", "completed", "uncertain"}:
+        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+    if not isinstance(reason, str):
+        return _empty_vlm_task_state(raw_text=content, parse_ok=False)
+
+    task_state = _empty_vlm_task_state(raw_text=content, parse_ok=True)
+    task_state["frame_state"]["summary"] = frame_summary.strip()
+    task_state["task_memory"]["state_summary"] = memory_summary.strip()
+    task_state["decision"]["terminate"] = terminate
+    task_state["decision"]["status"] = status
+    task_state["decision"]["reason"] = reason.strip()
+    return task_state
+
+
+def _init_episode_memory(history_size: int = DEFAULT_VLM_HISTORY_SIZE) -> dict[str, Any]:
+    """Create the minimal per-episode memory container for contextual VLM state."""
+    return {
+        "recent_history": [],
+        "running_summary": "",
+        "history_size": max(1, int(history_size)),
+    }
+
+
+def _snapshot_episode_memory(memory: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of the current episode memory state for logging/debugging."""
+    return {
+        "recent_history": list(memory.get("recent_history", [])),
+        "running_summary": str(memory.get("running_summary", "")),
+        "history_size": int(memory.get("history_size", DEFAULT_VLM_HISTORY_SIZE)),
+    }
+
+
+def _update_episode_memory(memory: dict[str, Any], task_state: dict[str, Any]) -> None:
+    """Update episode memory from a parsed task-state response."""
+    if not task_state.get("parse_ok", False):
+        return
+
+    frame_summary = task_state["frame_state"]["summary"]
+    if frame_summary:
+        recent_history = list(memory.get("recent_history", []))
+        recent_history.append(frame_summary)
+        history_size = max(1, int(memory.get("history_size", DEFAULT_VLM_HISTORY_SIZE)))
+        memory["recent_history"] = recent_history[-history_size:]
+    memory["running_summary"] = task_state["task_memory"]["state_summary"]
+
+
+def _parse_vlm_decision(response_payload: dict[str, Any]) -> dict[str, Any]:
+    """Parse an OpenAI-compatible VLM response into a terminate decision."""
+    task_state = _parse_vlm_task_state(response_payload)
+    if task_state["parse_ok"]:
+        return {
+            "terminate": task_state["decision"]["terminate"],
+            "reason": task_state["decision"]["reason"],
+            "raw_text": task_state["raw_text"],
+        }
+
+    content = task_state["raw_text"]
     json_match = re.search(r"\{.*\}", content, flags=re.DOTALL)
     if json_match is None:
         return {"terminate": False, "reason": "", "raw_text": content}
@@ -424,7 +535,7 @@ def _query_vlm_termination(
             }
         ],
         "stream": False,
-        "max_tokens": 256,
+        "max_tokens": 2048,
         "temperature": 0.1,
     }
     headers = {"Content-Type": "application/json"}
@@ -604,6 +715,7 @@ def run_single_task_eval(
             obs, _ = env.reset(reset_state_ids=[reset_state_id])
             obs = _standardize_env_obs(obs)
 
+            episode_memory = _init_episode_memory()
             done = False
             success = False
             episode_steps = 0
@@ -714,6 +826,7 @@ def run_single_task_eval(
                     "termination_source": termination_source,
                     "termination_reason": termination_reason,
                     "vlm_checks": vlm_checks,
+                    "task_memory_state": _snapshot_episode_memory(episode_memory),
                     "video_path": str(video_path) if video_path is not None else None,
                 }
             )
