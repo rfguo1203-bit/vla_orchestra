@@ -22,12 +22,13 @@ NUM_EPISODES=1
 SAVE_FRACTION=1.0
 SEED=""
 SHUFFLE="false"
-VLM_CHECK_INTERVAL=40
+VLM_CHECK_INTERVAL=20
 VLM_API_URL="${VLM_API_URL:-http://127.0.0.1:8972/v1/chat/completions}"
 VLM_API_KEY="${VLM_API_KEY:-}"
 VLM_X_AUTH_TOKEN="${VLM_X_AUTH_TOKEN:-}"
 VLM_MODEL="${VLM_MODEL:-Qwen3.5-27B}"
-VLM_PROMPT='You are judging whether a robot manipulation task is already complete from a single camera image. Reply with strict JSON only: {"terminate": true/false, "reason": "short reason"}. Set terminate=true only when the task goal is clearly finished in the image.'
+# VLM_PROMPT='You are judging whether a robot manipulation task is already complete from a single camera image. Reply with strict JSON only: {"terminate": true/false, "reason": "short reason"}. Set terminate=true only when the task goal is clearly finished in the image.'
+VLM_PROMPT=''
 VLM_TIMEOUT=30
 
 # Task selection: use exactly one of the following modes.
