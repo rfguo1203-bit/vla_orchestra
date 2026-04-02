@@ -73,12 +73,35 @@ def _resolve_rlinf_repo_root() -> Path:
 REPO_ROOT = _resolve_rlinf_repo_root()
 EMBODIED_PATH = REPO_ROOT / "examples" / "embodiment"
 DEFAULT_CONFIG_NAME = "libero_10_ppo_openpi_pi05"
-DEFAULT_VLM_PROMPT = (
-    "You are judging whether a robot manipulation task is already complete from a single "
-    "camera image. Reply with strict JSON only: "
-    '{"terminate": true/false, "reason": "short reason"}. '
-    "Set terminate=true only when the task goal is clearly finished in the image."
-)
+DEFAULT_VLM_PROMPT = """
+You are a robot task completion judge, not a controller.
+You will receive:
+- the task description,
+- the current base camera image,
+- a short running summary from earlier checks,
+- a short list of recent history summaries.
+
+Your job:
+1. summarize the current image state relevant to the task,
+2. update the task memory into one short state summary for the next check,
+3. decide whether the task is already completed.
+
+Rules:
+- Judge only from the provided image and text context.
+- Output terminate=true only when the task is clearly completed in the current image.
+- If the image is ambiguous, partially complete, occluded, or only near success, do not mark completed.
+- Reply with strict JSON only using this exact schema:
+{
+  "frame_state": {"summary": "..."},
+  "task_memory": {"state_summary": "..."},
+  "decision": {
+    "terminate": true,
+    "status": "completed",
+    "reason": "..."
+  }
+}
+- decision.status must be one of: "in_progress", "completed", "uncertain".
+""".strip()
 DEFAULT_VLM_HISTORY_SIZE = 3
 
 
@@ -476,6 +499,16 @@ def _snapshot_episode_memory(memory: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _should_terminate_from_task_state(task_state: dict[str, Any]) -> bool:
+    """Return whether a parsed task state should trigger early termination."""
+    decision = task_state["decision"]
+    return (
+        decision["terminate"]
+        and decision["status"] == "completed"
+        and bool(decision["reason"])
+    )
+
+
 def _update_episode_memory(memory: dict[str, Any], task_state: dict[str, Any]) -> None:
     """Update episode memory from a parsed task-state response."""
     if not task_state.get("parse_ok", False):
@@ -490,29 +523,39 @@ def _update_episode_memory(memory: dict[str, Any], task_state: dict[str, Any]) -
     memory["running_summary"] = task_state["task_memory"]["state_summary"]
 
 
-def _parse_vlm_decision(response_payload: dict[str, Any]) -> dict[str, Any]:
-    """Parse an OpenAI-compatible VLM response into a terminate decision."""
-    task_state = _parse_vlm_task_state(response_payload)
-    if task_state["parse_ok"]:
-        return {
-            "terminate": task_state["decision"]["terminate"],
-            "reason": task_state["decision"]["reason"],
-            "raw_text": task_state["raw_text"],
-        }
-
-    content = task_state["raw_text"]
-    json_match = re.search(r"\{.*\}", content, flags=re.DOTALL)
-    if json_match is None:
-        return {"terminate": False, "reason": "", "raw_text": content}
-
-    json_text = json_match.group(0)
-    decision = json.loads(json_text)
-    terminate = bool(decision.get("terminate", False))
-    reason = str(decision.get("reason", "")).strip()
-    return {"terminate": terminate, "reason": reason, "raw_text": content}
+def _build_failed_task_state(error_message: str) -> dict[str, Any]:
+    """Return a non-terminating task-state record for VLM call failures."""
+    task_state = _empty_vlm_task_state(raw_text="", parse_ok=False)
+    task_state["decision"]["reason"] = error_message.strip()
+    return task_state
 
 
-def _query_vlm_termination(
+def _build_contextual_vlm_prompt(
+    base_prompt: str,
+    task_name: str,
+    memory: dict[str, Any],
+) -> str:
+    """Build the lightweight contextual prompt for a keyframe VLM check."""
+    recent_history = memory.get("recent_history", [])
+    history_text = "\n".join(
+        f"- {item}" for item in recent_history if isinstance(item, str) and item.strip()
+    )
+    if not history_text:
+        history_text = "- none"
+
+    running_summary = str(memory.get("running_summary", "")).strip() or "none"
+    return (
+        f"{base_prompt}\n\n"
+        f"Task: {task_name}\n"
+        "Goal: determine whether this task is already completed in the current image.\n"
+        f"Running summary: {running_summary}\n"
+        "Recent history:\n"
+        f"{history_text}\n"
+        "Judge based only on the provided base camera image."
+    )
+
+
+def _query_vlm_task_state(
     api_url: str,
     api_key: str | None,
     x_auth_token: str | None,
@@ -521,7 +564,7 @@ def _query_vlm_termination(
     image: Any,
     timeout: float,
 ) -> dict[str, Any]:
-    """Call the local OpenAI-compatible VLM endpoint and return the termination decision."""
+    """Call the local OpenAI-compatible VLM endpoint and return the parsed task state."""
     image_data_url = _encode_image_to_data_url(image)
     request_body = {
         "model": model_name,
@@ -574,7 +617,7 @@ def _query_vlm_termination(
                         f"content_type={response.headers.get('Content-Type')!r}, "
                         f"body_preview={response_preview!r}"
                     ) from exc
-                return _parse_vlm_decision(response_payload)
+                return _parse_vlm_task_state(response_payload)
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(
@@ -721,7 +764,7 @@ def run_single_task_eval(
             episode_steps = 0
             termination_source = "env"
             termination_reason = ""
-            vlm_checks: list[dict[str, Any]] = []
+            memory_trace: list[dict[str, Any]] = []
             progress_bar = tqdm(
                 total=env_cfg.max_episode_steps,
                 desc=f"Episode {episode_idx}",
@@ -771,34 +814,47 @@ def run_single_task_eval(
                             base_image = _extract_base_image(obs)
                             if base_image is None:
                                 raise ValueError(
-                                    "VLM termination check requires obs['main_images'] to exist."
+                                    "Contextual VLM check requires obs['main_images'] to exist."
                                 )
-                            task_prompt = (
-                                f"{vlm_prompt}\n"
-                                f"Task: {task_name}\n"
-                                "Judge based only on the provided base camera image."
+                            memory_before = _snapshot_episode_memory(episode_memory)
+                            task_prompt = _build_contextual_vlm_prompt(
+                                base_prompt=vlm_prompt,
+                                task_name=task_name,
+                                memory=memory_before,
                             )
-                            vlm_decision = _query_vlm_termination(
-                                api_url=vlm_api_url,
-                                api_key=vlm_api_key,
-                                x_auth_token=vlm_x_auth_token,
-                                model_name=vlm_model,
-                                prompt=task_prompt,
-                                image=base_image,
-                                timeout=vlm_timeout,
-                            )
-                            vlm_record = {
+                            error_message = ""
+                            try:
+                                vlm_task_state = _query_vlm_task_state(
+                                    api_url=vlm_api_url,
+                                    api_key=vlm_api_key,
+                                    x_auth_token=vlm_x_auth_token,
+                                    model_name=vlm_model,
+                                    prompt=task_prompt,
+                                    image=base_image,
+                                    timeout=vlm_timeout,
+                                )
+                            except Exception as exc:
+                                error_message = str(exc)
+                                vlm_task_state = _build_failed_task_state(error_message)
+
+                            _update_episode_memory(episode_memory, vlm_task_state)
+                            trace_record = {
                                 "step": episode_steps,
-                                "terminate": vlm_decision["terminate"],
-                                "reason": vlm_decision["reason"],
-                                "raw_text": vlm_decision["raw_text"],
+                                "running_summary_before": memory_before["running_summary"],
+                                "recent_history_before": memory_before["recent_history"],
+                                "frame_state": vlm_task_state["frame_state"],
+                                "task_memory": vlm_task_state["task_memory"],
+                                "decision": vlm_task_state["decision"],
+                                "parse_ok": vlm_task_state["parse_ok"],
+                                "raw_text": vlm_task_state["raw_text"],
+                                "error": error_message,
                             }
-                            vlm_checks.append(vlm_record)
-                            if vlm_decision["terminate"]:
+                            memory_trace.append(trace_record)
+                            if _should_terminate_from_task_state(vlm_task_state):
                                 done = True
                                 success = True
                                 termination_source = "vlm"
-                                termination_reason = vlm_decision["reason"]
+                                termination_reason = vlm_task_state["decision"]["reason"]
                         if done:
                             break
             finally:
@@ -825,8 +881,8 @@ def run_single_task_eval(
                     "steps": episode_steps,
                     "termination_source": termination_source,
                     "termination_reason": termination_reason,
-                    "vlm_checks": vlm_checks,
-                    "task_memory_state": _snapshot_episode_memory(episode_memory),
+                    "memory_trace": memory_trace,
+                    "episode_memory": _snapshot_episode_memory(episode_memory),
                     "video_path": str(video_path) if video_path is not None else None,
                 }
             )
@@ -834,7 +890,7 @@ def run_single_task_eval(
                 output_session_dir.mkdir(parents=True, exist_ok=True)
                 json_path = video_path.with_suffix(".json")
                 with open(json_path, "w") as fp:
-                    json.dump(vlm_checks, fp, indent=2)
+                    json.dump(memory_trace, fp, indent=2)
     finally:
         env.close()
         _finalize_output_layout(
@@ -920,7 +976,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--vlm-check-interval",
         type=int,
         default=0,
-        help="Run one VLM termination check every k env steps. Set 0 to disable.",
+        help="Run one contextual VLM check every k env steps. Set 0 to disable.",
     )
     parser.add_argument(
         "--vlm-api-url",
@@ -950,7 +1006,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--vlm-prompt",
         type=str,
         default=DEFAULT_VLM_PROMPT,
-        help="Prompt template used for VLM termination checks.",
+        help="Prompt template used for contextual VLM checks.",
     )
     parser.add_argument(
         "--vlm-timeout",
