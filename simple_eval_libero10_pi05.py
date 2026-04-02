@@ -689,6 +689,8 @@ def run_single_task_eval(
                     "video_path": str(video_path) if video_path is not None else None,
                 }
             )
+            json_path = video_path.replace('.mp4', '.json')
+            json.dump(vlm_checks, open(json_path, 'w'), indent=2)
     finally:
         env.close()
 
@@ -854,4 +856,15 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    exit_code = 1
+    try:
+        main()
+        exit_code = 0
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        if exit_code == 0:
+            # Some simulator / rendering native extensions can crash during
+            # interpreter teardown after a successful run. Exit immediately once
+            # outputs are flushed to avoid post-run destructor crashes.
+            os._exit(0)
