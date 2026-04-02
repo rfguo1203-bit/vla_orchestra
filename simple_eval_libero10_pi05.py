@@ -28,8 +28,10 @@ import re
 import secrets
 import ssl
 import socket
+import shutil
 import urllib.error
 import urllib.request
+from datetime import datetime
 from itertools import accumulate
 from pathlib import Path
 import sys
@@ -252,8 +254,13 @@ def _slugify_task_name(task_name: str) -> str:
     return "".join(ch.lower() if ch.isalnum() else "_" for ch in task_name).strip("_")
 
 
-def _predict_video_path(video_base_dir: Path, seed: int, task_dir: str, video_idx: int) -> Path:
-    return video_base_dir / f"seed_{seed}" / task_dir / f"{video_idx}.mp4"
+def _build_output_session_dir(video_base_dir: Path, task_id: int) -> Path:
+    date_str = datetime.now().strftime("%Y%m%d")
+    return video_base_dir / f"{date_str}_{task_id}"
+
+
+def _predict_video_path(output_session_dir: Path, video_idx: int) -> Path:
+    return output_session_dir / f"{video_idx}.mp4"
 
 
 def _resolve_seed(seed: int | None) -> int:
@@ -261,19 +268,45 @@ def _resolve_seed(seed: int | None) -> int:
     return seed if seed is not None else secrets.randbelow(2**31)
 
 
-def _get_next_video_index(video_base_dir: Path, seed: int, task_dir: str) -> int:
-    """Return the next non-overlapping MP4 index for the target task directory."""
-    task_video_dir = video_base_dir / f"seed_{seed}" / task_dir
-    if not task_video_dir.exists():
+def _get_next_video_index(output_session_dir: Path) -> int:
+    """Return the next non-overlapping MP4 index for the target output directory."""
+    if not output_session_dir.exists():
         return 0
 
     existing_indices: list[int] = []
-    for mp4_path in task_video_dir.glob("*.mp4"):
+    for mp4_path in output_session_dir.glob("*.mp4"):
         try:
             existing_indices.append(int(mp4_path.stem))
         except ValueError:
             continue
     return max(existing_indices, default=-1) + 1
+
+
+def _finalize_output_layout(
+    video_base_dir: Path,
+    output_session_dir: Path,
+    seed: int,
+    task_dir: str,
+) -> None:
+    """Move videos from RLinf's seed-based layout into the requested flat layout."""
+    legacy_task_dir = video_base_dir / f"seed_{seed}" / task_dir
+    if not legacy_task_dir.exists():
+        return
+
+    output_session_dir.mkdir(parents=True, exist_ok=True)
+    for source_path in sorted(legacy_task_dir.iterdir()):
+        target_path = output_session_dir / source_path.name
+        if target_path.exists():
+            target_path.unlink()
+        shutil.move(str(source_path), str(target_path))
+
+    shutil.rmtree(legacy_task_dir, ignore_errors=True)
+    legacy_seed_dir = video_base_dir / f"seed_{seed}"
+    if legacy_seed_dir.exists():
+        try:
+            legacy_seed_dir.rmdir()
+        except OSError:
+            pass
 
 
 def _standardize_env_obs(obs: dict[str, Any]) -> dict[str, Any]:
@@ -527,6 +560,7 @@ def run_single_task_eval(
     )
 
     video_base_dir = Path(output_dir or (REPO_ROOT / "results" / "libero10_pi05_single_task"))
+    output_session_dir = _build_output_session_dir(video_base_dir, task_id)
     with open_dict(cfg):
         if model_path is not None:
             cfg.actor.model.model_path = model_path
@@ -557,11 +591,7 @@ def run_single_task_eval(
 
     episode_results: list[dict[str, Any]] = []
     saved_video_paths: list[str] = []
-    next_video_index = _get_next_video_index(
-        video_base_dir=video_base_dir,
-        seed=resolved_seed,
-        task_dir=task_slug,
-    )
+    next_video_index = _get_next_video_index(output_session_dir)
     vlm_enabled = vlm_check_interval > 0
     if vlm_enabled and (not vlm_api_url or not vlm_model):
         raise ValueError(
@@ -666,9 +696,7 @@ def run_single_task_eval(
             if episode_idx in save_video_indices and isinstance(env, RecordVideo):
                 env.video_cnt = next_video_index
                 video_path = _predict_video_path(
-                    video_base_dir=video_base_dir,
-                    seed=resolved_seed,
-                    task_dir=task_slug,
+                    output_session_dir=output_session_dir,
                     video_idx=env.video_cnt,
                 )
                 env.flush_video(video_sub_dir=task_slug)
@@ -689,10 +717,19 @@ def run_single_task_eval(
                     "video_path": str(video_path) if video_path is not None else None,
                 }
             )
-            json_path = video_path.replace('.mp4', '.json')
-            json.dump(vlm_checks, open(json_path, 'w'), indent=2)
+            if video_path is not None:
+                output_session_dir.mkdir(parents=True, exist_ok=True)
+                json_path = video_path.with_suffix(".json")
+                with open(json_path, "w") as fp:
+                    json.dump(vlm_checks, fp, indent=2)
     finally:
         env.close()
+        _finalize_output_layout(
+            video_base_dir=video_base_dir,
+            output_session_dir=output_session_dir,
+            seed=resolved_seed,
+            task_dir=task_slug,
+        )
 
     return {
         "task_id": task_id,
@@ -700,7 +737,7 @@ def run_single_task_eval(
         "seed": resolved_seed,
         "episodes": episode_results,
         "saved_video_paths": saved_video_paths,
-        "video_base_dir": str(video_base_dir),
+        "video_base_dir": str(output_session_dir),
     }
 
 
