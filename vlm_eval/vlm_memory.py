@@ -3,6 +3,7 @@ from __future__ import annotations
 """Contextual VLM prompt building, response parsing, and memory state helpers."""
 
 import json
+import re
 import socket
 import ssl
 import urllib.error
@@ -70,27 +71,74 @@ def strip_vlm_thinking(text: str) -> str:
     return text.strip()
 
 
-def extract_last_json_object(text: str) -> dict[str, Any] | None:
-    """Extract the last valid top-level JSON object from free-form model output."""
-    decoder = json.JSONDecoder()
-    candidates: list[dict[str, Any]] = []
-    for idx, ch in enumerate(text):
-        if ch != "{":
-            continue
+def extract_json_from_fenced_block(text: str) -> dict[str, Any] | None:
+    """Extract the last valid JSON object from a fenced ```json block."""
+    matches = re.findall(r"```json\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
+    for candidate in reversed(matches):
         try:
-            parsed, _end = decoder.raw_decode(text[idx:])
+            parsed = json.loads(candidate.strip())
         except json.JSONDecodeError:
             continue
         if isinstance(parsed, dict):
-            candidates.append(parsed)
-    return candidates[-1] if candidates else None
+            return parsed
+    return None
+
+
+def extract_top_level_json_objects(text: str) -> list[dict[str, Any]]:
+    """Extract valid top-level JSON objects without matching nested dicts."""
+    objects: list[dict[str, Any]] = []
+    start: int | None = None
+    depth = 0
+    in_string = False
+    escape = False
+
+    for idx, ch in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            if depth == 0:
+                start = idx
+            depth += 1
+        elif ch == "}":
+            if depth == 0:
+                continue
+            depth -= 1
+            if depth == 0 and start is not None:
+                candidate = text[start : idx + 1]
+                try:
+                    parsed = json.loads(candidate)
+                except json.JSONDecodeError:
+                    start = None
+                    continue
+                if isinstance(parsed, dict):
+                    objects.append(parsed)
+                start = None
+
+    return objects
+
+
+def extract_last_top_level_json_object(text: str) -> dict[str, Any] | None:
+    """Extract the last valid top-level JSON object from free-form model output."""
+    objects = extract_top_level_json_objects(text)
+    return objects[-1] if objects else None
 
 
 def parse_vlm_task_state(response_payload: dict[str, Any]) -> dict[str, Any]:
     """Parse an OpenAI-compatible VLM response into the minimal task-state schema."""
     content = extract_vlm_text_content(response_payload)
     cleaned_content = strip_vlm_thinking(content)
-    parsed = extract_last_json_object(cleaned_content)
+    parsed = extract_json_from_fenced_block(cleaned_content)
+    if parsed is None:
+        parsed = extract_last_top_level_json_object(cleaned_content)
     if parsed is None:
         return empty_vlm_task_state(raw_text=content, parse_ok=False)
 
