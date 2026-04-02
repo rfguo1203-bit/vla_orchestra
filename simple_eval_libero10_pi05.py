@@ -358,7 +358,10 @@ def _parse_vlm_decision(response_payload: dict[str, Any]) -> dict[str, Any]:
 
     content = content.strip()
     json_match = re.search(r"\{.*\}", content, flags=re.DOTALL)
-    json_text = json_match.group(0) if json_match else content
+    if json_match is None:
+        return {"terminate": False, "reason": "", "raw_text": content}
+
+    json_text = json_match.group(0)
     decision = json.loads(json_text)
     terminate = bool(decision.get("terminate", False))
     reason = str(decision.get("reason", "")).strip()
