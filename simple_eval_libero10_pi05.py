@@ -247,13 +247,16 @@ def run_single_task_eval(
                                 "step": episode_steps,
                                 "running_summary_before": memory_before["running_summary"],
                                 "recent_history_before": memory_before["recent_history"],
-                                "frame_state": vlm_task_state["frame_state"],
-                                "task_memory": vlm_task_state["task_memory"],
-                                "decision": vlm_task_state["decision"],
                                 "parse_ok": vlm_task_state["parse_ok"],
                                 "raw_text": vlm_task_state["raw_text"],
                                 "error": error_message,
                             }
+                            if vlm_task_state["parse_ok"]:
+                                trace_record["parsed_content"] = {
+                                    "frame_state": vlm_task_state["frame_state"],
+                                    "task_memory": vlm_task_state["task_memory"],
+                                    "decision": vlm_task_state["decision"],
+                                }
                             memory_trace.append(trace_record)
                             if should_terminate_from_task_state(vlm_task_state):
                                 done = True
@@ -295,7 +298,7 @@ def run_single_task_eval(
                 output_session_dir.mkdir(parents=True, exist_ok=True)
                 json_path = video_path.with_suffix(".json")
                 with open(json_path, "w") as fp:
-                    json.dump(memory_trace, fp, indent=2)
+                    json.dump(memory_trace, fp, indent=2, ensure_ascii=False)
     finally:
         env.close()
         finalize_output_layout(
