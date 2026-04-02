@@ -721,7 +721,7 @@ def run_single_task_eval(
             cfg.rollout.model.model_path = model_path
         cfg.env.eval.total_num_envs = 1
         cfg.env.eval.auto_reset = False
-        cfg.env.eval.ignore_terminations = False
+        cfg.env.eval.ignore_terminations = True
         cfg.env.eval.use_fixed_reset_state_ids = False
         cfg.env.eval.seed = resolved_seed
         cfg.env.eval.video_cfg.save_video = bool(save_video_indices)
@@ -795,13 +795,9 @@ def run_single_task_eval(
                         episode_steps += 1
                         progress_bar.update(1)
 
-                        terminated = _to_bool(terminations[0])
                         truncated = _to_bool(truncations[0])
-                        done = terminated or truncated
-                        success = success or terminated
-                        if terminated:
-                            termination_source = "env"
-                        elif truncated:
+                        done = truncated
+                        if truncated:
                             termination_source = "truncation"
 
                         should_check_vlm = (
