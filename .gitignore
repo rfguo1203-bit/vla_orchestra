@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 dockerrun.sh
 outputs
+ref/*.pdf
+*.DS_Store
