@@ -52,7 +52,10 @@ from vlm_eval.paths_and_config import (
     load_eval_cfg,
 )
 from vlm_eval.vlm_memory import (
-    build_contextual_vlm_prompt,
+    PARSE_MODE_BOOTSTRAP,
+    PARSE_MODE_KEYFRAME,
+    build_bootstrap_vlm_prompt,
+    build_keyframe_vlm_prompt,
     build_failed_task_state,
     init_episode_memory,
     query_vlm_task_state,
@@ -78,6 +81,9 @@ def run_single_task_eval(
     vlm_model: str | None = None,
     vlm_prompt: str = DEFAULT_VLM_PROMPT,
     vlm_timeout: float = 30.0,
+    vlm_bootstrap_prompt_version: str = "v1",
+    vlm_keyframe_prompt_version: str = "v1",
+    vlm_keyframe_include_prev_image: bool = False,
 ) -> dict[str, Any]:
     """Run a single-task LIBERO-10 evaluation loop without Ray workers."""
     from omegaconf import open_dict
@@ -174,11 +180,62 @@ def run_single_task_eval(
             termination_source = "env"
             termination_reason = ""
             memory_trace: list[dict[str, Any]] = []
+            previous_keyframe_image: Any | None = None
             progress_bar = tqdm(
                 total=env_cfg.max_episode_steps,
                 desc=f"Episode {episode_idx}",
                 leave=True,
             )
+            if vlm_enabled:
+                base_image = extract_base_image(obs)
+                if base_image is None:
+                    raise ValueError(
+                        "Bootstrap VLM check requires obs['main_images'] to exist."
+                    )
+                memory_before_bootstrap = snapshot_episode_memory(episode_memory)
+                bootstrap_prompt = build_bootstrap_vlm_prompt(
+                    base_prompt=vlm_prompt,
+                    task_name=task_name,
+                    prompt_version=vlm_bootstrap_prompt_version,
+                )
+                bootstrap_error = ""
+                try:
+                    bootstrap_state = query_vlm_task_state(
+                        api_url=vlm_api_url,
+                        api_key=vlm_api_key,
+                        x_auth_token=vlm_x_auth_token,
+                        model_name=vlm_model,
+                        prompt=bootstrap_prompt,
+                        image=base_image,
+                        timeout=vlm_timeout,
+                        parse_mode=PARSE_MODE_BOOTSTRAP,
+                    )
+                except Exception as exc:
+                    bootstrap_error = str(exc)
+                    bootstrap_state = build_failed_task_state(
+                        bootstrap_error,
+                        parse_mode=PARSE_MODE_BOOTSTRAP,
+                    )
+
+                update_episode_memory(episode_memory, bootstrap_state)
+                bootstrap_trace = {
+                    "phase": PARSE_MODE_BOOTSTRAP,
+                    "step": 0,
+                    "prompt_version": vlm_bootstrap_prompt_version,
+                    "episode_memory_before": memory_before_bootstrap,
+                    "parse_ok": bootstrap_state["parse_ok"],
+                    "raw_text": bootstrap_state["raw_text"],
+                    "error": bootstrap_error,
+                }
+                if bootstrap_state["parse_ok"]:
+                    bootstrap_trace["parsed_content"] = {
+                        "task_model": bootstrap_state["task_model"],
+                        "frame_state": bootstrap_state["frame_state"],
+                        "progress_state": bootstrap_state["progress_state"],
+                        "decision": bootstrap_state["decision"],
+                    }
+                memory_trace.append(bootstrap_trace)
+                previous_keyframe_image = base_image
 
             try:
                 while not done and episode_steps < env_cfg.max_episode_steps:
@@ -222,13 +279,19 @@ def run_single_task_eval(
                                     "Contextual VLM check requires obs['main_images'] to exist."
                                 )
                             memory_before = snapshot_episode_memory(episode_memory)
-                            task_prompt = build_contextual_vlm_prompt(
+                            task_prompt = build_keyframe_vlm_prompt(
                                 base_prompt=vlm_prompt,
                                 task_name=task_name,
                                 memory=memory_before,
+                                prompt_version=vlm_keyframe_prompt_version,
                             )
                             error_message = ""
                             try:
+                                previous_image = (
+                                    previous_keyframe_image
+                                    if vlm_keyframe_include_prev_image
+                                    else None
+                                )
                                 vlm_task_state = query_vlm_task_state(
                                     api_url=vlm_api_url,
                                     api_key=vlm_api_key,
@@ -237,16 +300,25 @@ def run_single_task_eval(
                                     prompt=task_prompt,
                                     image=base_image,
                                     timeout=vlm_timeout,
+                                    parse_mode=PARSE_MODE_KEYFRAME,
+                                    previous_image=previous_image,
                                 )
                             except Exception as exc:
                                 error_message = str(exc)
-                                vlm_task_state = build_failed_task_state(error_message)
+                                vlm_task_state = build_failed_task_state(
+                                    error_message,
+                                    parse_mode=PARSE_MODE_KEYFRAME,
+                                )
 
                             update_episode_memory(episode_memory, vlm_task_state)
+                            memory_after = snapshot_episode_memory(episode_memory)
                             trace_record = {
+                                "phase": PARSE_MODE_KEYFRAME,
                                 "step": episode_steps,
-                                "running_summary_before": memory_before["running_summary"],
-                                "recent_history_before": memory_before["recent_history"],
+                                "prompt_version": vlm_keyframe_prompt_version,
+                                "include_previous_image": vlm_keyframe_include_prev_image,
+                                "episode_memory_before": memory_before,
+                                "episode_memory_after": memory_after,
                                 "parse_ok": vlm_task_state["parse_ok"],
                                 "raw_text": vlm_task_state["raw_text"],
                                 "error": error_message,
@@ -254,15 +326,30 @@ def run_single_task_eval(
                             if vlm_task_state["parse_ok"]:
                                 trace_record["parsed_content"] = {
                                     "frame_state": vlm_task_state["frame_state"],
-                                    "task_memory": vlm_task_state["task_memory"],
+                                    "frame_delta": vlm_task_state["frame_delta"],
+                                    "task_model_patch": vlm_task_state[
+                                        "task_model_patch"
+                                    ],
+                                    "progress_state_patch": vlm_task_state[
+                                        "progress_state_patch"
+                                    ],
                                     "decision": vlm_task_state["decision"],
                                 }
+                                trace_record["progress_state_before"] = memory_before.get(
+                                    "progress_state", {}
+                                )
+                                trace_record["progress_state_after"] = memory_after.get(
+                                    "progress_state", {}
+                                )
                             memory_trace.append(trace_record)
-                            if should_terminate_from_task_state(vlm_task_state):
+                            if should_terminate_from_task_state(
+                                vlm_task_state, episode_memory
+                            ):
                                 done = True
                                 success = True
                                 termination_source = "vlm"
                                 termination_reason = vlm_task_state["decision"]["reason"]
+                            previous_keyframe_image = base_image
                         if done:
                             break
             finally:
@@ -422,6 +509,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=30.0,
         help="HTTP timeout in seconds for each VLM request.",
     )
+    parser.add_argument(
+        "--vlm-bootstrap-prompt-version",
+        type=str,
+        default="v1",
+        help="Version tag for bootstrap prompt logic.",
+    )
+    parser.add_argument(
+        "--vlm-keyframe-prompt-version",
+        type=str,
+        default="v1",
+        help="Version tag for keyframe prompt logic.",
+    )
+    parser.add_argument(
+        "--vlm-keyframe-include-prev-image",
+        action="store_true",
+        help="Include previous keyframe image as reference in keyframe VLM requests.",
+    )
     return parser
 
 
@@ -455,6 +559,9 @@ def main() -> None:
         vlm_model=args.vlm_model,
         vlm_prompt=args.vlm_prompt,
         vlm_timeout=args.vlm_timeout,
+        vlm_bootstrap_prompt_version=args.vlm_bootstrap_prompt_version,
+        vlm_keyframe_prompt_version=args.vlm_keyframe_prompt_version,
+        vlm_keyframe_include_prev_image=args.vlm_keyframe_include_prev_image,
     )
 
     print(f"Task {results['task_id']}: {results['task_name']} (seed={results['seed']})")

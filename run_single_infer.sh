@@ -30,6 +30,9 @@ VLM_MODEL="${VLM_MODEL:-Qwen3.5-27B}"
 # VLM_PROMPT='You are judging whether a robot manipulation task is already complete from a single camera image. Reply with strict JSON only: {"terminate": true/false, "reason": "short reason"}. Set terminate=true only when the task goal is clearly finished in the image.'
 VLM_PROMPT=''
 VLM_TIMEOUT=30
+VLM_BOOTSTRAP_PROMPT_VERSION="${VLM_BOOTSTRAP_PROMPT_VERSION:-v1}"
+VLM_KEYFRAME_PROMPT_VERSION="${VLM_KEYFRAME_PROMPT_VERSION:-v1}"
+VLM_KEYFRAME_INCLUDE_PREV_IMAGE="${VLM_KEYFRAME_INCLUDE_PREV_IMAGE:-false}"
 
 # Task selection: use exactly one of the following modes.
 LIST_TASKS="false"
@@ -98,6 +101,18 @@ fi
 
 if [[ -n "${VLM_TIMEOUT}" ]]; then
   ARGS+=(--vlm-timeout "${VLM_TIMEOUT}")
+fi
+
+if [[ -n "${VLM_BOOTSTRAP_PROMPT_VERSION}" ]]; then
+  ARGS+=(--vlm-bootstrap-prompt-version "${VLM_BOOTSTRAP_PROMPT_VERSION}")
+fi
+
+if [[ -n "${VLM_KEYFRAME_PROMPT_VERSION}" ]]; then
+  ARGS+=(--vlm-keyframe-prompt-version "${VLM_KEYFRAME_PROMPT_VERSION}")
+fi
+
+if [[ "${VLM_KEYFRAME_INCLUDE_PREV_IMAGE}" == "true" ]]; then
+  ARGS+=(--vlm-keyframe-include-prev-image)
 fi
 
 python "${SCRIPT_DIR}/simple_eval_libero10_pi05.py" "${ARGS[@]}"

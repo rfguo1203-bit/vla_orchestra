@@ -41,33 +41,14 @@ REPO_ROOT = resolve_rlinf_repo_root()
 EMBODIED_PATH = REPO_ROOT / "examples" / "embodiment"
 DEFAULT_CONFIG_NAME = "libero_10_ppo_openpi_pi05"
 DEFAULT_VLM_PROMPT = """
-你是一个机器人任务完成状态判定器，不是控制器。
-你会收到：
-- 任务描述，
-- 当前主视角图像，
-- 之前检查得到的一条简短运行状态摘要，
-- 最近几次状态摘要列表。
-
-你的任务：
-1. 总结当前图像里与任务相关的状态，
-2. 更新一条供下一次判断使用的简短任务记忆摘要，
-3. 判断任务现在是否已经完成。
-
-规则：
-- 只能根据提供的图像和文本上下文进行判断。
-- 只有当任务已经在当前图像中被明确完成时，才能输出 terminate=true。
-- 如果图像存在歧义、被遮挡、只是部分完成、或者只是接近成功，都不能判定为 completed。
-- 只能输出严格 JSON，且必须使用下面这个固定结构：
-{
-  "frame_state": {"summary": "..."},
-  "task_memory": {"state_summary": "..."},
-  "decision": {
-    "terminate": true,
-    "status": "completed",
-    "reason": "..."
-  }
-}
-- decision.status 只能是以下三者之一："in_progress"、"completed"、"uncertain"。
+你是机器人任务状态分析器，不是控制器。
+你需要输出结构化 JSON，禁止输出自由散文和长推理。
+请严格遵循调用方给出的阶段说明（bootstrap 或 keyframe_update）和字段要求。
+通用规则：
+- 只能依据当前图像和输入上下文判断。
+- 证据不足、存在遮挡、仅接近完成时，不得判定 completed。
+- 只有当图像证据明确支持任务完成时，才允许 terminate=true。
+- decision.status 只能是 in_progress/completed/uncertain。
 """.strip()
 DEFAULT_VLM_HISTORY_SIZE = 3
 

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-"""Contextual VLM prompt building, response parsing, and memory state helpers."""
+"""Generalized VLM contextual prompts, parsing, and episode-state helpers."""
 
+import copy
 import json
 import re
 import socket
@@ -11,7 +12,17 @@ import urllib.request
 from typing import Any
 
 from .io_and_video import encode_image_to_data_url
-from .paths_and_config import DEFAULT_VLM_HISTORY_SIZE
+
+VALID_DECISION_STATUS = {"in_progress", "completed", "uncertain"}
+PARSE_MODE_BOOTSTRAP = "bootstrap"
+PARSE_MODE_KEYFRAME = "keyframe"
+VALID_CONDITION_STATUS = {
+    "not_met",
+    "partially_met",
+    "likely_met",
+    "confirmed_met",
+    "uncertain",
+}
 
 
 def extract_vlm_text_content(response_payload: dict[str, Any]) -> str:
@@ -46,19 +57,42 @@ def extract_vlm_text_content(response_payload: dict[str, Any]) -> str:
     return content.strip()
 
 
-def empty_vlm_task_state(
+def empty_decision() -> dict[str, Any]:
+    return {
+        "terminate": False,
+        "status": "uncertain",
+        "reason": "",
+    }
+
+
+def empty_bootstrap_task_state(
     raw_text: str = "",
     parse_ok: bool = False,
 ) -> dict[str, Any]:
-    """Return the minimal contextual task-state schema with safe defaults."""
+    """Return bootstrap phase defaults."""
     return {
-        "frame_state": {"summary": ""},
-        "task_memory": {"state_summary": ""},
-        "decision": {
-            "terminate": False,
-            "status": "uncertain",
-            "reason": "",
-        },
+        "parse_mode": PARSE_MODE_BOOTSTRAP,
+        "task_model": {},
+        "frame_state": {},
+        "progress_state": {},
+        "decision": empty_decision(),
+        "raw_text": raw_text,
+        "parse_ok": parse_ok,
+    }
+
+
+def empty_keyframe_task_state(
+    raw_text: str = "",
+    parse_ok: bool = False,
+) -> dict[str, Any]:
+    """Return keyframe phase defaults."""
+    return {
+        "parse_mode": PARSE_MODE_KEYFRAME,
+        "frame_state": {},
+        "frame_delta": {},
+        "task_model_patch": {},
+        "progress_state_patch": {},
+        "decision": empty_decision(),
         "raw_text": raw_text,
         "parse_ok": parse_ok,
     }
@@ -132,122 +166,455 @@ def extract_last_top_level_json_object(text: str) -> dict[str, Any] | None:
     return objects[-1] if objects else None
 
 
-def parse_vlm_task_state(response_payload: dict[str, Any]) -> dict[str, Any]:
-    """Parse an OpenAI-compatible VLM response into the minimal task-state schema."""
+def parse_decision(decision: Any) -> dict[str, Any] | None:
+    """Validate and normalize a decision object."""
+    if not isinstance(decision, dict):
+        return None
+    terminate = decision.get("terminate")
+    status = decision.get("status")
+    reason = decision.get("reason")
+    if not isinstance(terminate, bool):
+        return None
+    if status not in VALID_DECISION_STATUS:
+        return None
+    if not isinstance(reason, str):
+        return None
+    return {
+        "terminate": terminate,
+        "status": status,
+        "reason": reason.strip(),
+    }
+
+
+def parse_vlm_bootstrap_state(response_payload: dict[str, Any]) -> dict[str, Any]:
+    """Parse bootstrap-phase response into generalized task state."""
     content = extract_vlm_text_content(response_payload)
     cleaned_content = strip_vlm_thinking(content)
     parsed = extract_json_from_fenced_block(cleaned_content)
     if parsed is None:
         parsed = extract_last_top_level_json_object(cleaned_content)
     if parsed is None:
-        return empty_vlm_task_state(raw_text=content, parse_ok=False)
+        return empty_bootstrap_task_state(raw_text=content, parse_ok=False)
 
+    task_model = parsed.get("task_model")
     frame_state = parsed.get("frame_state")
-    task_memory = parsed.get("task_memory")
-    decision = parsed.get("decision")
+    progress_state = parsed.get("progress_state")
+    if not isinstance(task_model, dict):
+        return empty_bootstrap_task_state(raw_text=content, parse_ok=False)
     if not isinstance(frame_state, dict):
-        return empty_vlm_task_state(raw_text=content, parse_ok=False)
-    if not isinstance(task_memory, dict):
-        return empty_vlm_task_state(raw_text=content, parse_ok=False)
-    if not isinstance(decision, dict):
-        return empty_vlm_task_state(raw_text=content, parse_ok=False)
+        return empty_bootstrap_task_state(raw_text=content, parse_ok=False)
+    if not isinstance(progress_state, dict):
+        return empty_bootstrap_task_state(raw_text=content, parse_ok=False)
 
-    frame_summary = frame_state.get("summary")
-    memory_summary = task_memory.get("state_summary")
-    terminate = decision.get("terminate")
-    status = decision.get("status")
-    reason = decision.get("reason")
-    if not isinstance(frame_summary, str):
-        return empty_vlm_task_state(raw_text=content, parse_ok=False)
-    if not isinstance(memory_summary, str):
-        return empty_vlm_task_state(raw_text=content, parse_ok=False)
-    if not isinstance(terminate, bool):
-        return empty_vlm_task_state(raw_text=content, parse_ok=False)
-    if status not in {"in_progress", "completed", "uncertain"}:
-        return empty_vlm_task_state(raw_text=content, parse_ok=False)
-    if not isinstance(reason, str):
-        return empty_vlm_task_state(raw_text=content, parse_ok=False)
+    normalized_decision = parse_decision(parsed.get("decision"))
+    if normalized_decision is None:
+        normalized_decision = empty_decision()
 
-    task_state = empty_vlm_task_state(raw_text=content, parse_ok=True)
-    task_state["frame_state"]["summary"] = frame_summary.strip()
-    task_state["task_memory"]["state_summary"] = memory_summary.strip()
-    task_state["decision"]["terminate"] = terminate
-    task_state["decision"]["status"] = status
-    task_state["decision"]["reason"] = reason.strip()
+    task_state = empty_bootstrap_task_state(raw_text=content, parse_ok=True)
+    task_state["task_model"] = task_model
+    task_state["frame_state"] = frame_state
+    task_state["progress_state"] = progress_state
+    task_state["decision"] = normalized_decision
     return task_state
 
 
-def init_episode_memory(history_size: int = DEFAULT_VLM_HISTORY_SIZE) -> dict[str, Any]:
-    """Create the minimal per-episode memory container for contextual VLM state."""
+def parse_vlm_keyframe_state(response_payload: dict[str, Any]) -> dict[str, Any]:
+    """Parse keyframe-phase response into generalized task state."""
+    content = extract_vlm_text_content(response_payload)
+    cleaned_content = strip_vlm_thinking(content)
+    parsed = extract_json_from_fenced_block(cleaned_content)
+    if parsed is None:
+        parsed = extract_last_top_level_json_object(cleaned_content)
+    if parsed is None:
+        return empty_keyframe_task_state(raw_text=content, parse_ok=False)
+
+    frame_state = parsed.get("frame_state")
+    frame_delta = parsed.get("frame_delta")
+    task_model_patch = parsed.get("task_model_patch")
+    progress_state_patch = parsed.get("progress_state_patch")
+    decision = parsed.get("decision")
+    if not isinstance(frame_state, dict):
+        return empty_keyframe_task_state(raw_text=content, parse_ok=False)
+    if not isinstance(frame_delta, dict):
+        return empty_keyframe_task_state(raw_text=content, parse_ok=False)
+    if not isinstance(progress_state_patch, dict):
+        return empty_keyframe_task_state(raw_text=content, parse_ok=False)
+    if task_model_patch is None:
+        task_model_patch = {}
+    if not isinstance(task_model_patch, dict):
+        return empty_keyframe_task_state(raw_text=content, parse_ok=False)
+    normalized_decision = parse_decision(decision)
+    if normalized_decision is None:
+        return empty_keyframe_task_state(raw_text=content, parse_ok=False)
+
+    task_state = empty_keyframe_task_state(raw_text=content, parse_ok=True)
+    task_state["frame_state"] = frame_state
+    task_state["frame_delta"] = frame_delta
+    task_state["task_model_patch"] = task_model_patch
+    task_state["progress_state_patch"] = progress_state_patch
+    task_state["decision"] = normalized_decision
+    return task_state
+
+
+def init_episode_memory() -> dict[str, Any]:
+    """Create the per-episode generalized memory container."""
     return {
-        "recent_history": [],
-        "running_summary": "",
-        "history_size": max(1, int(history_size)),
+        "task_model": {},
+        "previous_frame_state": {},
+        "progress_state": {},
     }
 
 
 def snapshot_episode_memory(memory: dict[str, Any]) -> dict[str, Any]:
     """Return a copy of the current episode memory state for logging/debugging."""
     return {
-        "recent_history": list(memory.get("recent_history", [])),
-        "running_summary": str(memory.get("running_summary", "")),
-        "history_size": int(memory.get("history_size", DEFAULT_VLM_HISTORY_SIZE)),
+        "task_model": copy.deepcopy(memory.get("task_model", {})),
+        "previous_frame_state": copy.deepcopy(memory.get("previous_frame_state", {})),
+        "progress_state": copy.deepcopy(memory.get("progress_state", {})),
     }
 
 
-def should_terminate_from_task_state(task_state: dict[str, Any]) -> bool:
+def _extract_success_condition_ids(task_model: dict[str, Any]) -> list[str]:
+    success_conditions = task_model.get("success_conditions")
+    if not isinstance(success_conditions, list):
+        return []
+    ids: list[str] = []
+    for idx, item in enumerate(success_conditions):
+        if isinstance(item, dict):
+            cond_id = item.get("id")
+            if isinstance(cond_id, str) and cond_id.strip():
+                ids.append(cond_id.strip())
+                continue
+        ids.append(f"cond_{idx + 1}")
+    return ids
+
+
+def _index_condition_status_items(
+    condition_status: Any,
+) -> dict[str, dict[str, Any]]:
+    indexed: dict[str, dict[str, Any]] = {}
+    if not isinstance(condition_status, list):
+        return indexed
+    for idx, item in enumerate(condition_status):
+        if not isinstance(item, dict):
+            continue
+        cond_id = item.get("condition_id")
+        if not isinstance(cond_id, str) or not cond_id.strip():
+            cond_id = f"cond_{idx + 1}"
+        status = item.get("status")
+        if status not in VALID_CONDITION_STATUS:
+            continue
+        indexed[cond_id] = copy.deepcopy(item)
+        indexed[cond_id]["condition_id"] = cond_id
+    return indexed
+
+
+def _normalize_status_conflict(
+    previous_item: dict[str, Any],
+    patch_item: dict[str, Any],
+) -> dict[str, Any]:
+    prev_status = previous_item.get("status")
+    patch_status = patch_item.get("status")
+    if (
+        prev_status == "confirmed_met"
+        and patch_status in {"not_met", "partially_met", "likely_met"}
+    ):
+        degraded = copy.deepcopy(previous_item)
+        degraded["status"] = "uncertain"
+        degraded["evidence"] = (
+            f"conflict_between_frames: previous={prev_status}, current={patch_status}"
+        )
+        return degraded
+    if prev_status == "confirmed_met" and patch_status == "uncertain":
+        # Do not roll back confirmed status on a single uncertain frame.
+        return copy.deepcopy(previous_item)
+    return copy.deepcopy(patch_item)
+
+
+def _normalize_visual_cues(cues: Any) -> list[str]:
+    if not isinstance(cues, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in cues:
+        if not isinstance(item, str):
+            continue
+        value = item.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+def merge_task_model_patch(
+    task_model: dict[str, Any],
+    task_model_patch: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply a constrained patch: only append entities[*].visual_cues."""
+    merged = copy.deepcopy(task_model)
+    patch = copy.deepcopy(task_model_patch)
+    entities = merged.get("entities")
+    patch_entities = patch.get("entities")
+    if not isinstance(entities, list) or not isinstance(patch_entities, list):
+        return merged
+
+    index_by_id: dict[str, int] = {}
+    index_by_name: dict[str, int] = {}
+    for idx, entity in enumerate(entities):
+        if not isinstance(entity, dict):
+            continue
+        entity_id = entity.get("id")
+        if isinstance(entity_id, str) and entity_id.strip():
+            index_by_id[entity_id.strip()] = idx
+        name = entity.get("name")
+        if isinstance(name, str) and name.strip():
+            index_by_name[name.strip()] = idx
+
+    for patch_entity in patch_entities:
+        if not isinstance(patch_entity, dict):
+            continue
+        entity_idx: int | None = None
+        entity_id = patch_entity.get("id")
+        if isinstance(entity_id, str) and entity_id.strip():
+            entity_idx = index_by_id.get(entity_id.strip())
+        if entity_idx is None:
+            name = patch_entity.get("name")
+            if isinstance(name, str) and name.strip():
+                entity_idx = index_by_name.get(name.strip())
+        if entity_idx is None:
+            continue
+        entity = entities[entity_idx]
+        if not isinstance(entity, dict):
+            continue
+        existing_cues = _normalize_visual_cues(entity.get("visual_cues"))
+        patch_cues = _normalize_visual_cues(patch_entity.get("visual_cues"))
+        if not patch_cues:
+            continue
+        seen = set(existing_cues)
+        for cue in patch_cues:
+            if cue not in seen:
+                existing_cues.append(cue)
+                seen.add(cue)
+        entity["visual_cues"] = existing_cues
+    merged["entities"] = entities
+    return merged
+
+
+def merge_progress_state(
+    previous_progress_state: dict[str, Any],
+    progress_state_patch: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge current keyframe patch into running progress state."""
+    merged = copy.deepcopy(previous_progress_state)
+    patch = copy.deepcopy(progress_state_patch)
+
+    prev_condition_map = _index_condition_status_items(merged.get("condition_status"))
+    patch_condition_map = _index_condition_status_items(patch.get("condition_status"))
+    merged_condition_ids = list(prev_condition_map.keys())
+    for cond_id in patch_condition_map:
+        if cond_id not in merged_condition_ids:
+            merged_condition_ids.append(cond_id)
+    merged_condition_status: list[dict[str, Any]] = []
+    for cond_id in merged_condition_ids:
+        previous_item = prev_condition_map.get(cond_id)
+        patch_item = patch_condition_map.get(cond_id)
+        if previous_item is None and patch_item is not None:
+            merged_condition_status.append(copy.deepcopy(patch_item))
+            continue
+        if previous_item is not None and patch_item is None:
+            merged_condition_status.append(copy.deepcopy(previous_item))
+            continue
+        if previous_item is not None and patch_item is not None:
+            merged_condition_status.append(
+                _normalize_status_conflict(previous_item, patch_item)
+            )
+    if merged_condition_status:
+        merged["condition_status"] = merged_condition_status
+
+    prev_tracking = merged.get("entity_tracking")
+    patch_tracking = patch.get("entity_tracking")
+    if isinstance(prev_tracking, list) or isinstance(patch_tracking, list):
+        prev_tracking_map: dict[str, dict[str, Any]] = {}
+        if isinstance(prev_tracking, list):
+            for item in prev_tracking:
+                if not isinstance(item, dict):
+                    continue
+                entity_id = item.get("entity_id")
+                if isinstance(entity_id, str) and entity_id.strip():
+                    prev_tracking_map[entity_id] = copy.deepcopy(item)
+        if isinstance(patch_tracking, list):
+            for item in patch_tracking:
+                if not isinstance(item, dict):
+                    continue
+                entity_id = item.get("entity_id")
+                if isinstance(entity_id, str) and entity_id.strip():
+                    prev_tracking_map[entity_id] = copy.deepcopy(item)
+        merged["entity_tracking"] = list(prev_tracking_map.values())
+
+    prev_overall = merged.get("overall_progress")
+    patch_overall = patch.get("overall_progress")
+    if isinstance(prev_overall, dict) or isinstance(patch_overall, dict):
+        overall = copy.deepcopy(prev_overall) if isinstance(prev_overall, dict) else {}
+        if isinstance(patch_overall, dict):
+            overall.update(copy.deepcopy(patch_overall))
+        prev_stage = (
+            prev_overall.get("stage") if isinstance(prev_overall, dict) else None
+        )
+        patch_stage = (
+            patch_overall.get("stage") if isinstance(patch_overall, dict) else None
+        )
+        if (
+            prev_stage == "completed"
+            and patch_stage in {"not_started", "in_progress", "near_completion"}
+        ):
+            overall["stage"] = "uncertain"
+            overall["blocking_factor"] = "insufficient_evidence"
+        merged["overall_progress"] = overall
+
+    for key, value in patch.items():
+        if key in {"condition_status", "entity_tracking", "overall_progress"}:
+            continue
+        merged[key] = copy.deepcopy(value)
+    return merged
+
+
+def should_terminate_from_task_state(
+    task_state: dict[str, Any],
+    episode_memory: dict[str, Any] | None = None,
+) -> bool:
     """Return whether a parsed task state should trigger early termination."""
     decision = task_state["decision"]
-    return (
+    decision_ok = (
         decision["terminate"]
         and decision["status"] == "completed"
         and bool(decision["reason"])
     )
+    if not decision_ok:
+        return False
+
+    if episode_memory is None:
+        return True
+
+    task_model = episode_memory.get("task_model", {})
+    progress_state = episode_memory.get("progress_state", {})
+    condition_ids = _extract_success_condition_ids(task_model)
+    if not condition_ids:
+        return True
+
+    condition_map = _index_condition_status_items(progress_state.get("condition_status"))
+    for cond_id in condition_ids:
+        item = condition_map.get(cond_id)
+        if not isinstance(item, dict):
+            return False
+        if item.get("status") != "confirmed_met":
+            return False
+    return True
 
 
 def update_episode_memory(memory: dict[str, Any], task_state: dict[str, Any]) -> None:
-    """Update episode memory from a parsed task-state response."""
+    """Update episode memory from parsed bootstrap/keyframe state."""
     if not task_state.get("parse_ok", False):
         return
 
-    frame_summary = task_state["frame_state"]["summary"]
-    if frame_summary:
-        recent_history = list(memory.get("recent_history", []))
-        recent_history.append(frame_summary)
-        history_size = max(1, int(memory.get("history_size", DEFAULT_VLM_HISTORY_SIZE)))
-        memory["recent_history"] = recent_history[-history_size:]
-    memory["running_summary"] = task_state["task_memory"]["state_summary"]
+    parse_mode = task_state.get("parse_mode")
+    if parse_mode == PARSE_MODE_BOOTSTRAP:
+        memory["task_model"] = copy.deepcopy(task_state["task_model"])
+        memory["previous_frame_state"] = copy.deepcopy(task_state["frame_state"])
+        memory["progress_state"] = copy.deepcopy(task_state["progress_state"])
+        return
+
+    if parse_mode == PARSE_MODE_KEYFRAME:
+        memory["previous_frame_state"] = copy.deepcopy(task_state["frame_state"])
+        memory["task_model"] = merge_task_model_patch(
+            task_model=memory.get("task_model", {}),
+            task_model_patch=task_state.get("task_model_patch", {}),
+        )
+        memory["progress_state"] = merge_progress_state(
+            previous_progress_state=memory.get("progress_state", {}),
+            progress_state_patch=task_state["progress_state_patch"],
+        )
 
 
-def build_failed_task_state(error_message: str) -> dict[str, Any]:
+def build_failed_task_state(
+    error_message: str,
+    parse_mode: str = PARSE_MODE_KEYFRAME,
+) -> dict[str, Any]:
     """Return a non-terminating task-state record for VLM call failures."""
-    task_state = empty_vlm_task_state(raw_text="", parse_ok=False)
+    if parse_mode == PARSE_MODE_BOOTSTRAP:
+        task_state = empty_bootstrap_task_state(raw_text="", parse_ok=False)
+    else:
+        task_state = empty_keyframe_task_state(raw_text="", parse_ok=False)
     task_state["decision"]["reason"] = error_message.strip()
     return task_state
 
 
-def build_contextual_vlm_prompt(
+def build_bootstrap_vlm_prompt(
+    base_prompt: str,
+    task_name: str,
+    prompt_version: str = "v1",
+) -> str:
+    """Build the bootstrap prompt to initialize generalized task state."""
+    return (
+        f"{base_prompt}\n\n"
+        "阶段：bootstrap（首帧初始化）\n"
+        f"prompt_version: {prompt_version}\n"
+        f"任务描述：{task_name}\n"
+        "请仅基于当前图像和任务描述，生成可跨帧复用的结构化任务模型与初始状态。\n"
+        "你必须输出严格 JSON，且只能包含以下顶层字段：\n"
+        "- task_model\n"
+        "- frame_state\n"
+        "- progress_state\n"
+        "- decision\n"
+        "decision 必须包含 terminate/status/reason，status 只能是 in_progress/completed/uncertain。\n"
+        "注意：frame_state 只描述当前帧可见事实；不要输出自由散文。"
+    )
+
+
+def build_keyframe_vlm_prompt(
     base_prompt: str,
     task_name: str,
     memory: dict[str, Any],
+    prompt_version: str = "v1",
 ) -> str:
-    """Build the lightweight contextual prompt for a keyframe VLM check."""
-    recent_history = memory.get("recent_history", [])
-    history_text = "\n".join(
-        f"- {item}" for item in recent_history if isinstance(item, str) and item.strip()
+    """Build the keyframe prompt with prior structured context."""
+    task_model_json = json.dumps(
+        memory.get("task_model", {}),
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
-    if not history_text:
-        history_text = "- 无"
-
-    running_summary = str(memory.get("running_summary", "")).strip() or "无"
+    previous_frame_json = json.dumps(
+        memory.get("previous_frame_state", {}),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    progress_state_json = json.dumps(
+        memory.get("progress_state", {}),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
     return (
         f"{base_prompt}\n\n"
+        "阶段：keyframe_update（关键帧更新）\n"
+        f"prompt_version: {prompt_version}\n"
         f"任务描述：{task_name}\n"
-        "目标：判断这个任务在当前图像中是否已经完成。\n"
-        f"运行中摘要：{running_summary}\n"
-        "最近历史：\n"
-        f"{history_text}\n"
-        "只能基于提供的主视角图像做判断。"
+        f"task_model: {task_model_json}\n"
+        f"previous_frame_state: {previous_frame_json}\n"
+        f"previous_progress_state: {progress_state_json}\n"
+        "请基于当前图像与以上结构化上下文，按顺序完成：\n"
+        "1) 输出当前帧结构化观察 frame_state；\n"
+        "2) 输出与上一关键帧的差异 frame_delta；\n"
+        "3) 可选输出 task_model_patch，仅允许补充 entities[*].visual_cues，不允许改动 success_conditions；\n"
+        "4) 输出 progress_state_patch（本帧更新后的结构化进度）；\n"
+        "5) 输出 decision（terminate/status/reason）。\n"
+        "你必须输出严格 JSON，且只能包含以下顶层字段：\n"
+        "- frame_state\n"
+        "- frame_delta\n"
+        "- task_model_patch（可选）\n"
+        "- progress_state_patch\n"
+        "- decision\n"
+        "decision.status 只能是 in_progress/completed/uncertain。\n"
+        "注意：不要复述长推理文本，字段应结构化、可机读。"
     )
 
 
@@ -259,18 +626,32 @@ def query_vlm_task_state(
     prompt: str,
     image: Any,
     timeout: float,
+    parse_mode: str = PARSE_MODE_KEYFRAME,
+    previous_image: Any | None = None,
 ) -> dict[str, Any]:
-    """Call the local OpenAI-compatible VLM endpoint and return the parsed task state."""
+    """Call the VLM endpoint and parse bootstrap/keyframe structured response."""
     image_data_url = encode_image_to_data_url(image)
+    message_content: list[dict[str, Any]] = []
+    if previous_image is not None:
+        previous_image_data_url = encode_image_to_data_url(previous_image)
+        message_content.extend(
+            [
+                {"type": "text", "text": "Reference previous keyframe image:"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": previous_image_data_url},
+                },
+                {"type": "text", "text": "Current keyframe image:"},
+            ]
+        )
+    message_content.append({"type": "image_url", "image_url": {"url": image_data_url}})
+    message_content.append({"type": "text", "text": prompt})
     request_body = {
         "model": model_name,
         "messages": [
             {
                 "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": image_data_url}},
-                    {"type": "text", "text": prompt},
-                ],
+                "content": message_content,
             }
         ],
         "stream": False,
@@ -313,7 +694,9 @@ def query_vlm_task_state(
                         f"content_type={response.headers.get('Content-Type')!r}, "
                         f"body_preview={response_preview!r}"
                     ) from exc
-                return parse_vlm_task_state(response_payload)
+                if parse_mode == PARSE_MODE_BOOTSTRAP:
+                    return parse_vlm_bootstrap_state(response_payload)
+                return parse_vlm_keyframe_state(response_payload)
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(
