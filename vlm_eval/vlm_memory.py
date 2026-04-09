@@ -370,6 +370,28 @@ def build_keyframe_vlm_prompt(
     task_name: str,
     memory: dict[str, Any],
     prompt_version: str = "v1",
+    prompt_scheme: str = "scheme1",
+) -> str:
+    if prompt_scheme == "scheme2":
+        return build_keyframe_vlm_prompt_scheme2(
+            base_prompt=base_prompt,
+            task_name=task_name,
+            memory=memory,
+            prompt_version=prompt_version,
+        )
+    return build_keyframe_vlm_prompt_scheme1(
+        base_prompt=base_prompt,
+        task_name=task_name,
+        memory=memory,
+        prompt_version=prompt_version,
+    )
+
+
+def build_keyframe_vlm_prompt_scheme1(
+    base_prompt: str,
+    task_name: str,
+    memory: dict[str, Any],
+    prompt_version: str = "v1",
 ) -> str:
     task_profile = str(memory.get("task_profile", "")).strip() or "无"
     running_summary = str(memory.get("running_summary", "")).strip() or "无"
@@ -402,6 +424,47 @@ def build_keyframe_vlm_prompt(
         "- 只有当前帧证据与任务目标明确对齐时，才可 decision.status=completed。\n"
         "- 不允许仅因历史文本猜测完成。\n"
         "- 若与历史描述冲突，应在 change_summary 中指出冲突，并保守判定。\n\n"
+        "输出格式：\n"
+        "你必须输出严格 JSON，且只能包含以下顶层字段：\n"
+        "- frame_summary\n"
+        "- change_summary\n"
+        "- progress_summary\n"
+        "- decision（包含 terminate/status/reason）\n"
+        "decision.status 只能是 in_progress/completed/uncertain。"
+    )
+
+
+def build_keyframe_vlm_prompt_scheme2(
+    base_prompt: str,
+    task_name: str,
+    memory: dict[str, Any],
+    prompt_version: str = "v1",
+) -> str:
+    task_profile = str(memory.get("task_profile", "")).strip() or "无"
+    running_summary = str(memory.get("running_summary", "")).strip() or "无"
+    return (
+        f"{base_prompt}\n\n"
+        "阶段：keyframe_update（关键帧更新）\n"
+        "prompt_scheme: scheme2\n"
+        f"prompt_version: {prompt_version}\n"
+        f"任务描述：{task_name}\n"
+        f"task_profile: {task_profile}\n"
+        f"running_summary: {running_summary}\n\n"
+        "输入约束：\n"
+        "- 你现在只能使用当前图像和 running_summary 更新任务状态；\n"
+        "- 不提供 recent_history 文本；\n"
+        "- 你必须把 running_summary 视作“已有动作/状态轨迹”，输出更新后的完整轨迹。\n\n"
+        "更新目标：\n"
+        "1) frame_summary：当前帧可见事实（2-5句，任务相关）；\n"
+        "2) change_summary：相对 running_summary 的新增变化（1-3句）；\n"
+        "3) progress_summary：更新后的任务进度轨迹（2-6句），应连续描述机械臂动作历史与物体变化历史；\n"
+        "   可以省略无变化项，突出关键变化链。\n"
+        "   例如：悬停 -> 下探 -> 抓取目标 -> 搬运 -> 释放 -> 目标进入容器。\n"
+        "4) decision：是否完成。\n\n"
+        "判定规则：\n"
+        "- completed 必须由当前帧证据支持，不能仅凭历史推断。\n"
+        "- 遮挡/证据不足/仅接近完成时，必须保持 in_progress 或 uncertain。\n"
+        "- 若与历史轨迹冲突，在 change_summary 中明确指出冲突并保守判定。\n\n"
         "输出格式：\n"
         "你必须输出严格 JSON，且只能包含以下顶层字段：\n"
         "- frame_summary\n"

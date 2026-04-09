@@ -86,6 +86,7 @@ def run_single_task_eval(
     vlm_timeout: float = 30.0,
     vlm_bootstrap_prompt_version: str = "v1",
     vlm_keyframe_prompt_version: str = "v1",
+    vlm_prompt_scheme: str = "scheme1",
     vlm_keyframe_include_prev_image: bool = False,
 ) -> dict[str, Any]:
     """Run a single-task LIBERO-10 evaluation loop without Ray workers."""
@@ -319,6 +320,7 @@ def run_single_task_eval(
                                 task_name=task_name,
                                 memory=memory_before,
                                 prompt_version=vlm_keyframe_prompt_version,
+                                prompt_scheme=vlm_prompt_scheme,
                             )
                             error_message = ""
                             try:
@@ -351,6 +353,7 @@ def run_single_task_eval(
                                 "phase": PARSE_MODE_KEYFRAME,
                                 "step": episode_steps,
                                 "prompt_version": vlm_keyframe_prompt_version,
+                                "prompt_scheme": vlm_prompt_scheme,
                                 "include_previous_image": vlm_keyframe_include_prev_image,
                                 "episode_memory_before": memory_before,
                                 "episode_memory_after": memory_after,
@@ -573,6 +576,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Version tag for keyframe prompt logic.",
     )
     parser.add_argument(
+        "--vlm-prompt-scheme",
+        type=str,
+        choices=["scheme1", "scheme2"],
+        default="scheme1",
+        help="Prompt construction scheme for keyframe updates.",
+    )
+    parser.add_argument(
         "--vlm-keyframe-include-prev-image",
         action="store_true",
         help="Include previous keyframe image as reference in keyframe VLM requests.",
@@ -614,6 +624,7 @@ def main() -> None:
         vlm_timeout=args.vlm_timeout,
         vlm_bootstrap_prompt_version=args.vlm_bootstrap_prompt_version,
         vlm_keyframe_prompt_version=args.vlm_keyframe_prompt_version,
+        vlm_prompt_scheme=args.vlm_prompt_scheme,
         vlm_keyframe_include_prev_image=args.vlm_keyframe_include_prev_image,
     )
 

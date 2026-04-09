@@ -34,6 +34,7 @@ VLM_PROMPT=''
 VLM_TIMEOUT=90
 VLM_BOOTSTRAP_PROMPT_VERSION="${VLM_BOOTSTRAP_PROMPT_VERSION:-v1}"
 VLM_KEYFRAME_PROMPT_VERSION="${VLM_KEYFRAME_PROMPT_VERSION:-v1}"
+VLM_PROMPT_SCHEME="${VLM_PROMPT_SCHEME:-scheme1}"
 VLM_KEYFRAME_INCLUDE_PREV_IMAGE="${VLM_KEYFRAME_INCLUDE_PREV_IMAGE:-false}"
 
 # Task selection: use exactly one of the following modes.
@@ -116,6 +117,10 @@ fi
 
 if [[ -n "${VLM_KEYFRAME_PROMPT_VERSION}" ]]; then
   ARGS+=(--vlm-keyframe-prompt-version "${VLM_KEYFRAME_PROMPT_VERSION}")
+fi
+
+if [[ -n "${VLM_PROMPT_SCHEME}" ]]; then
+  ARGS+=(--vlm-prompt-scheme "${VLM_PROMPT_SCHEME}")
 fi
 
 if [[ "${VLM_KEYFRAME_INCLUDE_PREV_IMAGE}" == "true" ]]; then
