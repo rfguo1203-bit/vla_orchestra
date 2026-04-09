@@ -229,9 +229,9 @@ def run_single_task_eval(
                 }
                 if bootstrap_state["parse_ok"]:
                     bootstrap_trace["parsed_content"] = {
-                        "task_model": bootstrap_state["task_model"],
-                        "frame_state": bootstrap_state["frame_state"],
-                        "progress_state": bootstrap_state["progress_state"],
+                        "task_profile": bootstrap_state["task_profile"],
+                        "frame_summary": bootstrap_state["frame_summary"],
+                        "progress_summary": bootstrap_state["progress_summary"],
                         "decision": bootstrap_state["decision"],
                     }
                 memory_trace.append(bootstrap_trace)
@@ -325,21 +325,24 @@ def run_single_task_eval(
                             }
                             if vlm_task_state["parse_ok"]:
                                 trace_record["parsed_content"] = {
-                                    "frame_state": vlm_task_state["frame_state"],
-                                    "frame_delta": vlm_task_state["frame_delta"],
-                                    "task_model_patch": vlm_task_state[
-                                        "task_model_patch"
-                                    ],
-                                    "progress_state_patch": vlm_task_state[
-                                        "progress_state_patch"
+                                    "frame_summary": vlm_task_state["frame_summary"],
+                                    "change_summary": vlm_task_state["change_summary"],
+                                    "progress_summary": vlm_task_state[
+                                        "progress_summary"
                                     ],
                                     "decision": vlm_task_state["decision"],
                                 }
-                                trace_record["progress_state_before"] = memory_before.get(
-                                    "progress_state", {}
+                                trace_record["running_summary_before"] = memory_before.get(
+                                    "running_summary", ""
                                 )
-                                trace_record["progress_state_after"] = memory_after.get(
-                                    "progress_state", {}
+                                trace_record["running_summary_after"] = memory_after.get(
+                                    "running_summary", ""
+                                )
+                                trace_record["recent_history_before"] = memory_before.get(
+                                    "recent_history", []
+                                )
+                                trace_record["recent_history_after"] = memory_after.get(
+                                    "recent_history", []
                                 )
                             memory_trace.append(trace_record)
                             if should_terminate_from_task_state(

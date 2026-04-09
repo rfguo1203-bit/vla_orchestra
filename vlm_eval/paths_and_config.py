@@ -42,7 +42,7 @@ EMBODIED_PATH = REPO_ROOT / "examples" / "embodiment"
 DEFAULT_CONFIG_NAME = "libero_10_ppo_openpi_pi05"
 DEFAULT_VLM_PROMPT = """
 你是机器人任务状态分析器，不是控制器。
-你需要输出结构化 JSON，禁止输出自由散文和长推理。
+你需要输出严格 JSON，但图像观察与任务进展字段必须使用自然语言摘要。
 请严格遵循调用方给出的阶段说明（bootstrap 或 keyframe_update）和字段要求。
 通用规则：
 - 只能依据当前图像和输入上下文判断。
