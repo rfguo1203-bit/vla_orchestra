@@ -25,6 +25,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
+import imageio
 from tqdm.auto import tqdm
 from vlm_eval.io_and_video import (
     build_output_session_dir,
@@ -185,7 +186,36 @@ def run_single_task_eval(
             termination_reason = ""
             memory_trace: list[dict[str, Any]] = []
             previous_keyframe_image: Any | None = None
-            last_video_flush_step = -1
+            episode_video_path: Path | None = None
+            if episode_idx in save_video_indices and isinstance(env, RecordVideo):
+                episode_video_path = predict_video_path(
+                    output_session_dir=output_session_dir,
+                    video_idx=next_video_index,
+                )
+                next_video_index += 1
+            episode_json_path = (
+                episode_video_path.with_suffix(".json")
+                if episode_video_path is not None
+                else output_session_dir / f"episode_{episode_idx}.json"
+            )
+
+            def save_episode_checkpoint() -> None:
+                output_session_dir.mkdir(parents=True, exist_ok=True)
+                if episode_video_path is not None and isinstance(env, RecordVideo):
+                    frames = list(env.render_images)
+                    if frames:
+                        writer = imageio.get_writer(
+                            str(episode_video_path),
+                            fps=getattr(env, "_fps", 30),
+                        )
+                        try:
+                            for frame in frames:
+                                writer.append_data(frame)
+                        finally:
+                            writer.close()
+                with open(episode_json_path, "w") as fp:
+                    json.dump(memory_trace, fp, indent=2, ensure_ascii=False)
+
             progress_bar = tqdm(
                 total=env_cfg.max_episode_steps,
                 desc=f"Episode {episode_idx}",
@@ -365,31 +395,7 @@ def run_single_task_eval(
                             and episode_steps % save_every_steps == 0
                         )
                         if should_save_checkpoint:
-                            output_session_dir.mkdir(parents=True, exist_ok=True)
-                            if episode_idx in save_video_indices and isinstance(
-                                env, RecordVideo
-                            ):
-                                env.video_cnt = next_video_index
-                                checkpoint_video_path = predict_video_path(
-                                    output_session_dir=output_session_dir,
-                                    video_idx=env.video_cnt,
-                                )
-                                env.flush_video(video_sub_dir=task_slug)
-                                next_video_index = env.video_cnt
-                                saved_video_paths.append(str(checkpoint_video_path))
-                                checkpoint_json_path = checkpoint_video_path.with_suffix(
-                                    ".json"
-                                )
-                                with open(checkpoint_json_path, "w") as fp:
-                                    json.dump(memory_trace, fp, indent=2, ensure_ascii=False)
-                                last_video_flush_step = episode_steps
-                            else:
-                                checkpoint_json_path = (
-                                    output_session_dir
-                                    / f"episode_{episode_idx}_step_{episode_steps}.json"
-                                )
-                                with open(checkpoint_json_path, "w") as fp:
-                                    json.dump(memory_trace, fp, indent=2, ensure_ascii=False)
+                            save_episode_checkpoint()
                         if done:
                             break
             finally:
@@ -397,14 +403,9 @@ def run_single_task_eval(
 
             video_path = None
             if episode_idx in save_video_indices and isinstance(env, RecordVideo):
-                if last_video_flush_step != episode_steps:
-                    env.video_cnt = next_video_index
-                    video_path = predict_video_path(
-                        output_session_dir=output_session_dir,
-                        video_idx=env.video_cnt,
-                    )
-                    env.flush_video(video_sub_dir=task_slug)
-                    next_video_index = env.video_cnt
+                save_episode_checkpoint()
+                video_path = episode_video_path
+                if video_path is not None:
                     saved_video_paths.append(str(video_path))
 
             episode_results.append(
@@ -422,11 +423,8 @@ def run_single_task_eval(
                     "video_path": str(video_path) if video_path is not None else None,
                 }
             )
-            if video_path is not None:
-                output_session_dir.mkdir(parents=True, exist_ok=True)
-                json_path = video_path.with_suffix(".json")
-                with open(json_path, "w") as fp:
-                    json.dump(memory_trace, fp, indent=2, ensure_ascii=False)
+            if video_path is None and save_every_steps > 0:
+                save_episode_checkpoint()
     finally:
         env.close()
         finalize_output_layout(
