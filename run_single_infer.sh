@@ -21,6 +21,7 @@ CONFIG_NAME="libero_10_ppo_openpi_pi05"
 NUM_EPISODES=1
 MAX_EPISODE_STEPS="${MAX_EPISODE_STEPS:-}"
 SAVE_FRACTION=1.0
+SAVE_EVERY_STEPS="${SAVE_EVERY_STEPS:-0}"
 SEED=""
 SHUFFLE="false"
 VLM_CHECK_INTERVAL=20
@@ -58,6 +59,7 @@ ARGS=(
   --output-dir "${OUTPUT_DIR}"
   --num-episodes "${NUM_EPISODES}"
   --save-fraction "${SAVE_FRACTION}"
+  --save-every-steps "${SAVE_EVERY_STEPS}"
 )
 
 if [[ -n "${MAX_EPISODE_STEPS}" ]]; then

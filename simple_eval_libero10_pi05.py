@@ -75,6 +75,7 @@ def run_single_task_eval(
     shuffle: bool = False,
     seed: int | None = None,
     save_fraction: float = 1.0,
+    save_every_steps: int = 0,
     vlm_check_interval: int = 0,
     vlm_api_url: str | None = None,
     vlm_api_key: str | None = None,
@@ -184,6 +185,7 @@ def run_single_task_eval(
             termination_reason = ""
             memory_trace: list[dict[str, Any]] = []
             previous_keyframe_image: Any | None = None
+            last_video_flush_step = -1
             progress_bar = tqdm(
                 total=env_cfg.max_episode_steps,
                 desc=f"Episode {episode_idx}",
@@ -356,6 +358,38 @@ def run_single_task_eval(
                                 termination_source = "vlm"
                                 termination_reason = vlm_task_state["decision"]["reason"]
                             previous_keyframe_image = base_image
+
+                        should_save_checkpoint = (
+                            save_every_steps > 0
+                            and episode_steps > 0
+                            and episode_steps % save_every_steps == 0
+                        )
+                        if should_save_checkpoint:
+                            output_session_dir.mkdir(parents=True, exist_ok=True)
+                            if episode_idx in save_video_indices and isinstance(
+                                env, RecordVideo
+                            ):
+                                env.video_cnt = next_video_index
+                                checkpoint_video_path = predict_video_path(
+                                    output_session_dir=output_session_dir,
+                                    video_idx=env.video_cnt,
+                                )
+                                env.flush_video(video_sub_dir=task_slug)
+                                next_video_index = env.video_cnt
+                                saved_video_paths.append(str(checkpoint_video_path))
+                                checkpoint_json_path = checkpoint_video_path.with_suffix(
+                                    ".json"
+                                )
+                                with open(checkpoint_json_path, "w") as fp:
+                                    json.dump(memory_trace, fp, indent=2, ensure_ascii=False)
+                                last_video_flush_step = episode_steps
+                            else:
+                                checkpoint_json_path = (
+                                    output_session_dir
+                                    / f"episode_{episode_idx}_step_{episode_steps}.json"
+                                )
+                                with open(checkpoint_json_path, "w") as fp:
+                                    json.dump(memory_trace, fp, indent=2, ensure_ascii=False)
                         if done:
                             break
             finally:
@@ -363,14 +397,15 @@ def run_single_task_eval(
 
             video_path = None
             if episode_idx in save_video_indices and isinstance(env, RecordVideo):
-                env.video_cnt = next_video_index
-                video_path = predict_video_path(
-                    output_session_dir=output_session_dir,
-                    video_idx=env.video_cnt,
-                )
-                env.flush_video(video_sub_dir=task_slug)
-                next_video_index = env.video_cnt
-                saved_video_paths.append(str(video_path))
+                if last_video_flush_step != episode_steps:
+                    env.video_cnt = next_video_index
+                    video_path = predict_video_path(
+                        output_session_dir=output_session_dir,
+                        video_idx=env.video_cnt,
+                    )
+                    env.flush_video(video_sub_dir=task_slug)
+                    next_video_index = env.video_cnt
+                    saved_video_paths.append(str(video_path))
 
             episode_results.append(
                 {
@@ -480,6 +515,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fraction of evaluated episodes to export as videos.",
     )
     parser.add_argument(
+        "--save-every-steps",
+        type=int,
+        default=0,
+        help="Save incremental video/json checkpoints every k env steps. Set 0 to disable.",
+    )
+    parser.add_argument(
         "--vlm-check-interval",
         type=int,
         default=0,
@@ -565,6 +606,7 @@ def main() -> None:
         shuffle=args.shuffle,
         seed=args.seed,
         save_fraction=args.save_fraction,
+        save_every_steps=args.save_every_steps,
         vlm_check_interval=args.vlm_check_interval,
         vlm_api_url=args.vlm_api_url,
         vlm_api_key=args.vlm_api_key,
