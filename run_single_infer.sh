@@ -19,6 +19,7 @@ MODEL_PATH="${MODEL_PATH:-${REPO_PATH}/weight/RLinf-Pi05-SFT}"
 OUTPUT_DIR="${OUTPUT_DIR:-${SCRIPT_DIR}/outputs}"
 CONFIG_NAME="libero_10_ppo_openpi_pi05"
 NUM_EPISODES=1
+MAX_EPISODE_STEPS="${MAX_EPISODE_STEPS:-}"
 SAVE_FRACTION=1.0
 SEED=""
 SHUFFLE="false"
@@ -58,6 +59,10 @@ ARGS=(
   --num-episodes "${NUM_EPISODES}"
   --save-fraction "${SAVE_FRACTION}"
 )
+
+if [[ -n "${MAX_EPISODE_STEPS}" ]]; then
+  ARGS+=(--max-episode-steps "${MAX_EPISODE_STEPS}")
+fi
 
 if [[ "${LIST_TASKS}" == "true" ]]; then
   ARGS+=(--list-tasks)

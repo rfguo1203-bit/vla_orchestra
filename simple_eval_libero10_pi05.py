@@ -71,6 +71,7 @@ def run_single_task_eval(
     model_path: str | None = None,
     output_dir: str | None = None,
     num_episodes: int | None = 1,
+    max_episode_steps: int | None = None,
     shuffle: bool = False,
     seed: int | None = None,
     save_fraction: float = 1.0,
@@ -139,6 +140,8 @@ def run_single_task_eval(
         cfg.env.eval.ignore_terminations = True
         cfg.env.eval.use_fixed_reset_state_ids = False
         cfg.env.eval.seed = resolved_seed
+        if max_episode_steps is not None:
+            cfg.env.eval.max_episode_steps = int(max_episode_steps)
         cfg.env.eval.video_cfg.save_video = bool(save_video_indices)
         cfg.env.eval.video_cfg.video_base_dir = str(video_base_dir)
 
@@ -454,6 +457,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="How many reset states to evaluate for the selected task.",
     )
     parser.add_argument(
+        "--max-episode-steps",
+        type=int,
+        default=None,
+        help="Optional override for cfg.env.eval.max_episode_steps.",
+    )
+    parser.add_argument(
         "--shuffle",
         action="store_true",
         help="Shuffle reset states before truncating to num_episodes.",
@@ -552,6 +561,7 @@ def main() -> None:
         model_path=args.model_path,
         output_dir=args.output_dir,
         num_episodes=args.num_episodes,
+        max_episode_steps=args.max_episode_steps,
         shuffle=args.shuffle,
         seed=args.seed,
         save_fraction=args.save_fraction,

@@ -342,14 +342,25 @@ def build_bootstrap_vlm_prompt(
         f"{base_prompt}\n\n"
         "阶段：bootstrap（首帧初始化）\n"
         f"prompt_version: {prompt_version}\n"
-        f"任务描述：{task_name}\n"
-        "请基于当前帧图像，输出自然语言任务上下文初始化。\n"
-        "图像与任务总结必须用自然语言，不要输出对象级结构化字段。\n"
+        f"任务描述：{task_name}\n\n"
+        "你的职责：\n"
+        "1) 建立任务语义基线（task_profile），明确完成标准与常见误判；\n"
+        "2) 给出首帧可见事实摘要（frame_summary）；\n"
+        "3) 给出首帧任务进展总结（progress_summary）。\n\n"
+        "写作要求（自然语言）：\n"
+        "- task_profile: 描述任务目标、判定完成必须满足的视觉证据、以及不能误判为完成的情形。\n"
+        "- frame_summary: 只写当前帧可见事实，不要推测不可见内容。\n"
+        "- progress_summary: 总结当前离完成还差什么。\n"
+        "- 使用短句、明确主语，避免空泛词汇。\n\n"
+        "判定规则：\n"
+        "- 仅当图像中有明确视觉证据满足任务目标时，才可 terminate=true 且 status=completed。\n"
+        "- 遮挡、歧义、接近完成、疑似完成，都不能判 completed。\n\n"
+        "输出格式：\n"
         "你必须输出严格 JSON，且只能包含以下顶层字段：\n"
-        "- task_profile: 自然语言任务画像（短段落）\n"
-        "- frame_summary: 当前帧自然语言观察摘要\n"
-        "- progress_summary: 当前任务进展自然语言摘要\n"
-        "- decision: {terminate,status,reason}\n"
+        "- task_profile\n"
+        "- frame_summary\n"
+        "- progress_summary\n"
+        "- decision（包含 terminate/status/reason）\n"
         "decision.status 只能是 in_progress/completed/uncertain。"
     )
 
@@ -376,14 +387,27 @@ def build_keyframe_vlm_prompt(
         f"任务描述：{task_name}\n"
         f"task_profile: {task_profile}\n"
         f"running_summary: {running_summary}\n"
-        f"recent_history:\n{history_text}\n"
-        "请根据当前帧图像和过往帧文本描述，更新任务状态。\n"
-        "输出必须是自然语言摘要，不要输出对象级结构化字段。\n"
+        f"recent_history:\n{history_text}\n\n"
+        "你的职责：\n"
+        "1) 基于当前帧图像，输出新的 frame_summary（当前可见事实）；\n"
+        "2) 对比 running_summary 与 recent_history，输出 change_summary（这一关键帧相对历史的变化）；\n"
+        "3) 结合本帧证据和历史文本，输出更新后的 progress_summary；\n"
+        "4) 输出 decision。\n\n"
+        "写作要求（自然语言）：\n"
+        "- frame_summary: 强调任务相关可见事实，不要罗列无关背景。\n"
+        "- change_summary: 明确“发生了什么变化/没有变化”。\n"
+        "- progress_summary: 必须体现“当前状态 + 未完成项/完成依据”。\n"
+        "- 若看不清或证据不足，必须在 change_summary 或 progress_summary 中明确写出不确定性来源。\n\n"
+        "判定规则：\n"
+        "- 只有当前帧证据与任务目标明确对齐时，才可 decision.status=completed。\n"
+        "- 不允许仅因历史文本猜测完成。\n"
+        "- 若与历史描述冲突，应在 change_summary 中指出冲突，并保守判定。\n\n"
+        "输出格式：\n"
         "你必须输出严格 JSON，且只能包含以下顶层字段：\n"
-        "- frame_summary: 当前帧自然语言观察摘要\n"
-        "- change_summary: 相对过往描述的变化摘要\n"
-        "- progress_summary: 更新后的任务进展自然语言摘要\n"
-        "- decision: {terminate,status,reason}\n"
+        "- frame_summary\n"
+        "- change_summary\n"
+        "- progress_summary\n"
+        "- decision（包含 terminate/status/reason）\n"
         "decision.status 只能是 in_progress/completed/uncertain。"
     )
 
@@ -421,7 +445,7 @@ def query_vlm_task_state(
             }
         ],
         "stream": False,
-        "max_tokens": 2048,
+        "max_tokens": 10240,
         "temperature": 0.1,
     }
     headers = {"Content-Type": "application/json"}

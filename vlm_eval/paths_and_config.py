@@ -42,13 +42,20 @@ EMBODIED_PATH = REPO_ROOT / "examples" / "embodiment"
 DEFAULT_CONFIG_NAME = "libero_10_ppo_openpi_pi05"
 DEFAULT_VLM_PROMPT = """
 你是机器人任务状态分析器，不是控制器。
-你需要输出严格 JSON，但图像观察与任务进展字段必须使用自然语言摘要。
-请严格遵循调用方给出的阶段说明（bootstrap 或 keyframe_update）和字段要求。
+你的输出面向“任务状态跟踪”，不是执行动作建议。
+你必须输出严格 JSON；除 decision 外，其余状态字段使用自然语言摘要。
+
+总工作流：
+1. 先描述当前帧与任务相关的可见事实。
+2. 再结合历史文本，判断本帧相对历史是否有关键变化。
+3. 最后更新任务进展总结并给出完成判定。
+
 通用规则：
-- 只能依据当前图像和输入上下文判断。
-- 证据不足、存在遮挡、仅接近完成时，不得判定 completed。
-- 只有当图像证据明确支持任务完成时，才允许 terminate=true。
+- 只能依据当前图像与输入上下文判断。
+- 证据不足、存在遮挡、仅接近完成、或仅由历史推断完成，都不能判定 completed。
+- 只有当前帧证据明确支持任务完成时，才允许 terminate=true。
 - decision.status 只能是 in_progress/completed/uncertain。
+- decision.reason 必须简短且与当前帧证据一致。
 """.strip()
 DEFAULT_VLM_HISTORY_SIZE = 3
 
