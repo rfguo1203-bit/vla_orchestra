@@ -254,11 +254,12 @@ def run_single_task_eval(
                     )
 
                 update_episode_memory(episode_memory, bootstrap_state)
+                memory_after_bootstrap = snapshot_episode_memory(episode_memory)
                 bootstrap_trace = {
                     "phase": PARSE_MODE_BOOTSTRAP,
                     "step": 0,
                     "prompt_version": vlm_bootstrap_prompt_version,
-                    "episode_memory_before": memory_before_bootstrap,
+                    "episode_memory": memory_after_bootstrap,
                     "parse_ok": bootstrap_state["parse_ok"],
                     "raw_text": bootstrap_state["raw_text"],
                     "error": bootstrap_error,
@@ -355,8 +356,7 @@ def run_single_task_eval(
                                 "prompt_version": vlm_keyframe_prompt_version,
                                 "prompt_scheme": vlm_prompt_scheme,
                                 "include_previous_image": vlm_keyframe_include_prev_image,
-                                "episode_memory_before": memory_before,
-                                "episode_memory_after": memory_after,
+                                "episode_memory": memory_after,
                                 "parse_ok": vlm_task_state["parse_ok"],
                                 "raw_text": vlm_task_state["raw_text"],
                                 "error": error_message,
@@ -370,17 +370,8 @@ def run_single_task_eval(
                                     ],
                                     "decision": vlm_task_state["decision"],
                                 }
-                                trace_record["running_summary_before"] = memory_before.get(
-                                    "running_summary", ""
-                                )
                                 trace_record["running_summary_after"] = memory_after.get(
                                     "running_summary", ""
-                                )
-                                trace_record["recent_history_before"] = memory_before.get(
-                                    "recent_history", []
-                                )
-                                trace_record["recent_history_after"] = memory_after.get(
-                                    "recent_history", []
                                 )
                             memory_trace.append(trace_record)
                             if should_terminate_from_task_state(
