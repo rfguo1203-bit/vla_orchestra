@@ -7,6 +7,7 @@ import json
 import re
 import socket
 import ssl
+import urllib.parse
 import urllib.error
 import urllib.request
 from typing import Any
@@ -267,6 +268,93 @@ def init_episode_memory() -> dict[str, Any]:
     }
 
 
+def init_vlm_conversation() -> list[dict[str, Any]]:
+    """Initialize one VLM chat session for a single episode."""
+    return []
+
+
+def build_vlm_headers(
+    api_key: str | None,
+    x_auth_token: str | None,
+    request_id: str | None = None,
+) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    if x_auth_token:
+        headers["x-auth-token"] = x_auth_token
+    if request_id:
+        headers["X-Request-Id"] = request_id
+    return headers
+
+
+def build_reset_caches_url(api_url: str) -> str:
+    parsed = urllib.parse.urlsplit(api_url)
+    return urllib.parse.urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            "/internal/reset-caches",
+            "",
+            "",
+        )
+    )
+
+
+def reset_vlm_caches(
+    api_url: str,
+    api_key: str | None,
+    x_auth_token: str | None,
+    timeout: float,
+    reset_prefix_cache: bool = True,
+    reset_mm_cache: bool = True,
+    reset_running_requests: bool = False,
+    request_id: str | None = None,
+) -> dict[str, Any]:
+    reset_url = build_reset_caches_url(api_url)
+    request_body = {
+        "reset_prefix_cache": reset_prefix_cache,
+        "reset_mm_cache": reset_mm_cache,
+        "reset_running_requests": reset_running_requests,
+    }
+    request = urllib.request.Request(
+        reset_url,
+        data=json.dumps(request_body).encode("utf-8"),
+        headers=build_vlm_headers(
+            api_key=api_key,
+            x_auth_token=x_auth_token,
+            request_id=request_id,
+        ),
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=timeout,
+            context=ssl.create_default_context(),
+        ) as response:
+            response_text = response.read().decode("utf-8", errors="replace").strip()
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"VLM cache reset failed with HTTP {exc.code}: {body}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"VLM cache reset failed: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise TimeoutError(f"VLM cache reset timed out after {timeout}s.") from exc
+    except socket.timeout as exc:
+        raise TimeoutError(f"VLM cache reset timed out after {timeout}s.") from exc
+
+    if not response_text:
+        return {}
+    try:
+        parsed = json.loads(response_text)
+    except json.JSONDecodeError:
+        return {"raw_text": response_text}
+    return parsed if isinstance(parsed, dict) else {"response": parsed}
+
+
 def snapshot_episode_memory(memory: dict[str, Any]) -> dict[str, Any]:
     return {
         "task_profile": str(memory.get("task_profile", "")),
@@ -485,6 +573,7 @@ def query_vlm_task_state(
     timeout: float,
     parse_mode: str = PARSE_MODE_KEYFRAME,
     previous_image: Any | None = None,
+    conversation_messages: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     image_data_url = encode_image_to_data_url(image)
     message_content: list[dict[str, Any]] = []
@@ -499,21 +588,31 @@ def query_vlm_task_state(
         )
     message_content.append({"type": "image_url", "image_url": {"url": image_data_url}})
     message_content.append({"type": "text", "text": prompt})
-    request_body = {
-        "model": model_name,
-        "messages": [
+    request_messages: list[dict[str, Any]]
+    if conversation_messages is None:
+        request_messages = [
             {
                 "role": "user",
                 "content": message_content,
             }
-        ],
+        ]
+    else:
+        request_messages = copy.deepcopy(conversation_messages)
+        request_messages.append(
+            {
+                "role": "user",
+                "content": message_content,
+            }
+        )
+
+    request_body = {
+        "model": model_name,
+        "messages": request_messages,
         "stream": False,
         "max_tokens": 10240,
         "temperature": 0.1,
     }
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    headers = build_vlm_headers(api_key=api_key, x_auth_token=x_auth_token)
     request_bytes = json.dumps(request_body).encode("utf-8")
     request = urllib.request.Request(
         api_url,
@@ -521,8 +620,6 @@ def query_vlm_task_state(
         headers=headers,
         method="POST",
     )
-    if x_auth_token:
-        request.add_header("x-auth-token", x_auth_token)
     last_timeout_error: TimeoutError | None = None
     for attempt in range(1, 4):
         try:
@@ -548,8 +645,24 @@ def query_vlm_task_state(
                         f"body_preview={response_preview!r}"
                     ) from exc
                 if parse_mode == PARSE_MODE_BOOTSTRAP:
-                    return parse_vlm_bootstrap_state(response_payload)
-                return parse_vlm_keyframe_state(response_payload)
+                    task_state = parse_vlm_bootstrap_state(response_payload)
+                else:
+                    task_state = parse_vlm_keyframe_state(response_payload)
+
+                if conversation_messages is not None:
+                    conversation_messages.append(
+                        {
+                            "role": "user",
+                            "content": message_content,
+                        }
+                    )
+                    conversation_messages.append(
+                        {
+                            "role": "assistant",
+                            "content": task_state["raw_text"],
+                        }
+                    )
+                return task_state
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(

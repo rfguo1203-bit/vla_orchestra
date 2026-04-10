@@ -59,7 +59,9 @@ from vlm_eval.vlm_memory import (
     build_keyframe_vlm_prompt,
     build_failed_task_state,
     init_episode_memory,
+    init_vlm_conversation,
     query_vlm_task_state,
+    reset_vlm_caches,
     should_terminate_from_task_state,
     snapshot_episode_memory,
     update_episode_memory,
@@ -175,11 +177,23 @@ def run_single_task_eval(
 
     try:
         for episode_idx, reset_state_id in enumerate(chosen_reset_state_ids):
+            if vlm_enabled:
+                reset_vlm_caches(
+                    api_url=vlm_api_url,
+                    api_key=vlm_api_key,
+                    x_auth_token=vlm_x_auth_token,
+                    timeout=vlm_timeout,
+                    reset_prefix_cache=True,
+                    reset_mm_cache=True,
+                    reset_running_requests=False,
+                    request_id=f"episode-{episode_idx}-reset-caches",
+                )
             env.is_start = False
             obs, _ = env.reset(reset_state_ids=[reset_state_id])
             obs = standardize_env_obs(obs)
 
             episode_memory = init_episode_memory()
+            episode_vlm_conversation = init_vlm_conversation()
             done = False
             success = False
             episode_steps = 0
@@ -245,6 +259,7 @@ def run_single_task_eval(
                         image=base_image,
                         timeout=vlm_timeout,
                         parse_mode=PARSE_MODE_BOOTSTRAP,
+                        conversation_messages=episode_vlm_conversation,
                     )
                 except Exception as exc:
                     bootstrap_error = str(exc)
@@ -340,6 +355,7 @@ def run_single_task_eval(
                                     timeout=vlm_timeout,
                                     parse_mode=PARSE_MODE_KEYFRAME,
                                     previous_image=previous_image,
+                                    conversation_messages=episode_vlm_conversation,
                                 )
                             except Exception as exc:
                                 error_message = str(exc)
@@ -356,7 +372,7 @@ def run_single_task_eval(
                                 "prompt_version": vlm_keyframe_prompt_version,
                                 "prompt_scheme": vlm_prompt_scheme,
                                 "include_previous_image": vlm_keyframe_include_prev_image,
-                                "episode_memory": memory_after,
+                                "episode_memory_after": memory_after,
                                 "parse_ok": vlm_task_state["parse_ok"],
                                 "raw_text": vlm_task_state["raw_text"],
                                 "error": error_message,
