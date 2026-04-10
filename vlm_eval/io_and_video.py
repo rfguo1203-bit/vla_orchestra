@@ -116,6 +116,17 @@ def extract_base_image(obs: dict[str, Any]) -> Any:
         return main_images
 
 
+def extract_wrist_image(obs: dict[str, Any]) -> Any:
+    """Return the first environment's wrist camera image."""
+    wrist_images = obs.get("wrist_images")
+    if wrist_images is None:
+        return None
+    try:
+        return wrist_images[0]
+    except (IndexError, TypeError):
+        return wrist_images
+
+
 def encode_image_to_data_url(image: Any) -> str:
     """Encode an observation image into a PNG data URL."""
     from PIL import Image

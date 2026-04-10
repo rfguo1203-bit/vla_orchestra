@@ -539,6 +539,7 @@ def query_vlm_task_state(
     timeout: float,
     parse_mode: str = PARSE_MODE_KEYFRAME,
     previous_image: Any | None = None,
+    wrist_image: Any | None = None,
     conversation_messages: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     image_data_url = encode_image_to_data_url(image)
@@ -549,10 +550,22 @@ def query_vlm_task_state(
             [
                 {"type": "text", "text": "Reference previous keyframe image:"},
                 {"type": "image_url", "image_url": {"url": previous_image_data_url}},
-                {"type": "text", "text": "Current keyframe image:"},
+                {"type": "text", "text": "Current main (third-person) image:"},
             ]
         )
+    elif wrist_image is not None:
+        message_content.append(
+            {"type": "text", "text": "Current main (third-person) image:"}
+        )
     message_content.append({"type": "image_url", "image_url": {"url": image_data_url}})
+    if wrist_image is not None:
+        wrist_image_data_url = encode_image_to_data_url(wrist_image)
+        message_content.extend(
+            [
+                {"type": "text", "text": "Current wrist camera image:"},
+                {"type": "image_url", "image_url": {"url": wrist_image_data_url}},
+            ]
+        )
     message_content.append({"type": "text", "text": prompt})
     request_messages: list[dict[str, Any]]
     if conversation_messages is None:

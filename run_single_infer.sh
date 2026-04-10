@@ -36,6 +36,7 @@ VLM_TIMEOUT=90
 VLM_BOOTSTRAP_PROMPT_VERSION="${VLM_BOOTSTRAP_PROMPT_VERSION:-v1}"
 VLM_KEYFRAME_PROMPT_VERSION="${VLM_KEYFRAME_PROMPT_VERSION:-v1}"
 VLM_KEYFRAME_INCLUDE_PREV_IMAGE="${VLM_KEYFRAME_INCLUDE_PREV_IMAGE:-false}"
+VLM_INCLUDE_WRIST_IMAGE="${VLM_INCLUDE_WRIST_IMAGE:-true}"
 VLM_FRAME_INTERVAL_SECONDS="${VLM_FRAME_INTERVAL_SECONDS:-0}"
 
 # Task selection: use exactly one of the following modes.
@@ -126,6 +127,10 @@ fi
 
 if [[ "${VLM_KEYFRAME_INCLUDE_PREV_IMAGE}" == "true" ]]; then
   ARGS+=(--vlm-keyframe-include-prev-image)
+fi
+
+if [[ "${VLM_INCLUDE_WRIST_IMAGE}" == "true" ]]; then
+  ARGS+=(--vlm-include-wrist-image)
 fi
 
 if [[ -n "${VLM_FRAME_INTERVAL_SECONDS}" ]]; then

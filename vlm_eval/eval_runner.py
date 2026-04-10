@@ -12,6 +12,7 @@ from .io_and_video import (
     build_output_session_dir,
     compute_num_save_videos,
     extract_base_image,
+    extract_wrist_image,
     finalize_output_layout,
     get_next_video_index,
     predict_video_path,
@@ -263,10 +264,12 @@ def _run_bootstrap_vlm_check(
     vlm_prompt_lang: str,
     vlm_timeout: float,
     vlm_bootstrap_prompt_version: str,
+    vlm_include_wrist_image: bool,
 ) -> None:
     base_image = extract_base_image(obs)
     if base_image is None:
         raise ValueError("Bootstrap VLM check requires obs['main_images'] to exist.")
+    wrist_image = extract_wrist_image(obs) if vlm_include_wrist_image else None
 
     bootstrap_prompt = build_bootstrap_vlm_prompt(
         base_prompt=vlm_prompt,
@@ -283,6 +286,7 @@ def _run_bootstrap_vlm_check(
             model_name=vlm_model,
             prompt=bootstrap_prompt,
             image=base_image,
+            wrist_image=wrist_image,
             timeout=vlm_timeout,
             parse_mode=PARSE_MODE_BOOTSTRAP,
             conversation_messages=episode_state.conversation,
@@ -300,6 +304,7 @@ def _run_bootstrap_vlm_check(
         "phase": PARSE_MODE_BOOTSTRAP,
         "step": 0,
         "prompt_version": vlm_bootstrap_prompt_version,
+        "include_wrist_image": vlm_include_wrist_image,
         "episode_memory": memory_after_bootstrap,
         "parse_ok": bootstrap_state["parse_ok"],
         "raw_text": bootstrap_state["raw_text"],
@@ -333,10 +338,12 @@ def _run_keyframe_vlm_check(
     vlm_keyframe_prompt_version: str,
     vlm_keyframe_include_prev_image: bool,
     vlm_frame_interval_seconds: float,
+    vlm_include_wrist_image: bool,
 ) -> None:
     base_image = extract_base_image(obs)
     if base_image is None:
         raise ValueError("Contextual VLM check requires obs['main_images'] to exist.")
+    wrist_image = extract_wrist_image(obs) if vlm_include_wrist_image else None
 
     estimated_frame_interval_seconds = float(vlm_check_interval / max(1.0, env_fps))
     effective_frame_interval_seconds = (
@@ -365,6 +372,7 @@ def _run_keyframe_vlm_check(
             model_name=vlm_model,
             prompt=task_prompt,
             image=base_image,
+            wrist_image=wrist_image,
             timeout=vlm_timeout,
             parse_mode=PARSE_MODE_KEYFRAME,
             previous_image=previous_image,
@@ -384,6 +392,7 @@ def _run_keyframe_vlm_check(
         "step": episode_state.steps,
         "prompt_version": vlm_keyframe_prompt_version,
         "include_previous_image": vlm_keyframe_include_prev_image,
+        "include_wrist_image": vlm_include_wrist_image,
         "frame_interval_seconds": effective_frame_interval_seconds,
         "episode_memory_after": memory_after,
         "parse_ok": vlm_task_state["parse_ok"],
@@ -425,6 +434,7 @@ def _maybe_run_vlm_check(
     vlm_keyframe_prompt_version: str,
     vlm_keyframe_include_prev_image: bool,
     vlm_frame_interval_seconds: float,
+    vlm_include_wrist_image: bool,
 ) -> None:
     should_check_vlm = (
         vlm_enabled
@@ -451,6 +461,7 @@ def _maybe_run_vlm_check(
         vlm_keyframe_prompt_version=vlm_keyframe_prompt_version,
         vlm_keyframe_include_prev_image=vlm_keyframe_include_prev_image,
         vlm_frame_interval_seconds=vlm_frame_interval_seconds,
+        vlm_include_wrist_image=vlm_include_wrist_image,
     )
 
 
@@ -473,6 +484,7 @@ def _step_episode_loop(
     vlm_keyframe_prompt_version: str,
     vlm_keyframe_include_prev_image: bool,
     vlm_frame_interval_seconds: float,
+    vlm_include_wrist_image: bool,
 ) -> None:
     from rlinf.envs.action_utils import prepare_actions
     from tqdm.auto import tqdm
@@ -528,6 +540,7 @@ def _step_episode_loop(
                     vlm_keyframe_prompt_version=vlm_keyframe_prompt_version,
                     vlm_keyframe_include_prev_image=vlm_keyframe_include_prev_image,
                     vlm_frame_interval_seconds=vlm_frame_interval_seconds,
+                    vlm_include_wrist_image=vlm_include_wrist_image,
                 )
 
                 should_save_checkpoint = (
@@ -567,6 +580,7 @@ def _run_single_episode(
     vlm_keyframe_prompt_version: str,
     vlm_keyframe_include_prev_image: bool,
     vlm_frame_interval_seconds: float,
+    vlm_include_wrist_image: bool,
 ) -> dict[str, Any]:
     if runtime.vlm_enabled:
         reset_vlm_caches(
@@ -600,6 +614,7 @@ def _run_single_episode(
             vlm_prompt_lang=vlm_prompt_lang,
             vlm_timeout=vlm_timeout,
             vlm_bootstrap_prompt_version=vlm_bootstrap_prompt_version,
+            vlm_include_wrist_image=vlm_include_wrist_image,
         )
 
     _step_episode_loop(
@@ -620,6 +635,7 @@ def _run_single_episode(
         vlm_keyframe_prompt_version=vlm_keyframe_prompt_version,
         vlm_keyframe_include_prev_image=vlm_keyframe_include_prev_image,
         vlm_frame_interval_seconds=vlm_frame_interval_seconds,
+        vlm_include_wrist_image=vlm_include_wrist_image,
     )
 
     video_path = None
@@ -680,6 +696,7 @@ def run_single_task_eval(
     vlm_keyframe_prompt_version: str = "v1",
     vlm_keyframe_include_prev_image: bool = False,
     vlm_frame_interval_seconds: float = 0.0,
+    vlm_include_wrist_image: bool = False,
 ) -> dict[str, Any]:
     """Run a single-task LIBERO-10 evaluation loop without Ray workers."""
     runtime = _build_runtime(
@@ -723,6 +740,7 @@ def run_single_task_eval(
                 vlm_keyframe_prompt_version=vlm_keyframe_prompt_version,
                 vlm_keyframe_include_prev_image=vlm_keyframe_include_prev_image,
                 vlm_frame_interval_seconds=vlm_frame_interval_seconds,
+                vlm_include_wrist_image=vlm_include_wrist_image,
             )
             episode_results.append(episode_result)
     finally:

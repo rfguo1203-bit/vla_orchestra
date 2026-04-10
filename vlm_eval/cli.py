@@ -150,6 +150,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include previous keyframe image as reference in keyframe VLM requests.",
     )
     parser.add_argument(
+        "--vlm-include-wrist-image",
+        action="store_true",
+        help="Include current wrist camera image in VLM requests.",
+    )
+    parser.add_argument(
         "--vlm-frame-interval-seconds",
         type=float,
         default=0.0,
@@ -199,6 +204,7 @@ def main() -> None:
         vlm_keyframe_prompt_version=args.vlm_keyframe_prompt_version,
         vlm_keyframe_include_prev_image=args.vlm_keyframe_include_prev_image,
         vlm_frame_interval_seconds=args.vlm_frame_interval_seconds,
+        vlm_include_wrist_image=args.vlm_include_wrist_image,
     )
 
     print(f"Task {results['task_id']}: {results['task_name']} (seed={results['seed']})")
