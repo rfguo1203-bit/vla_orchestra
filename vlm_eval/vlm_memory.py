@@ -52,6 +52,20 @@ def extract_vlm_text_content(response_payload: dict[str, Any]) -> str:
     return content.strip()
 
 
+def extract_text_only_message_content(
+    message_content: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Keep only text parts from multimodal user content for chat history."""
+    text_only_parts: list[dict[str, str]] = []
+    for content_item in message_content:
+        if content_item.get("type") != "text":
+            continue
+        text = content_item.get("text")
+        if isinstance(text, str) and text.strip():
+            text_only_parts.append({"type": "text", "text": text})
+    return text_only_parts
+
+
 def empty_decision() -> dict[str, Any]:
     return {
         "terminate": False,
@@ -650,10 +664,13 @@ def query_vlm_task_state(
                     task_state = parse_vlm_keyframe_state(response_payload)
 
                 if conversation_messages is not None:
+                    text_only_user_content = extract_text_only_message_content(
+                        message_content
+                    )
                     conversation_messages.append(
                         {
                             "role": "user",
-                            "content": message_content,
+                            "content": text_only_user_content,
                         }
                     )
                     conversation_messages.append(
