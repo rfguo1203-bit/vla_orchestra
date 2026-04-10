@@ -36,6 +36,7 @@ VLM_BOOTSTRAP_PROMPT_VERSION="${VLM_BOOTSTRAP_PROMPT_VERSION:-v1}"
 VLM_KEYFRAME_PROMPT_VERSION="${VLM_KEYFRAME_PROMPT_VERSION:-v1}"
 VLM_PROMPT_SCHEME="${VLM_PROMPT_SCHEME:-scheme2}"
 VLM_KEYFRAME_INCLUDE_PREV_IMAGE="${VLM_KEYFRAME_INCLUDE_PREV_IMAGE:-false}"
+VLM_FRAME_INTERVAL_SECONDS="${VLM_FRAME_INTERVAL_SECONDS:-0}"
 
 # Task selection: use exactly one of the following modes.
 LIST_TASKS="false"
@@ -125,6 +126,10 @@ fi
 
 if [[ "${VLM_KEYFRAME_INCLUDE_PREV_IMAGE}" == "true" ]]; then
   ARGS+=(--vlm-keyframe-include-prev-image)
+fi
+
+if [[ -n "${VLM_FRAME_INTERVAL_SECONDS}" ]]; then
+  ARGS+=(--vlm-frame-interval-seconds "${VLM_FRAME_INTERVAL_SECONDS}")
 fi
 
 python "${SCRIPT_DIR}/simple_eval_libero10_pi05.py" "${ARGS[@]}"

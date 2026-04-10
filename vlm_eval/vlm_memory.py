@@ -444,20 +444,23 @@ def build_bootstrap_vlm_prompt(
         f"{base_prompt}\n\n"
         "阶段：bootstrap（首帧初始化）\n"
         f"prompt_version: {prompt_version}\n"
+        "角色设定：\n"
+        "- 你是机器人任务状态分析器，不是控制器；\n"
+        "- 你的目标是稳定追踪任务状态，而不是生成动作建议。\n\n"
+        "边界约束：\n"
+        "- 只能依据当前图像与本消息文本判断；\n"
+        "- 不得臆测遮挡区域或不可见状态；\n"
+        "- 证据不足时必须保守，不能因接近完成而判定完成。\n\n"
         f"任务描述：{task_name}\n\n"
-        "你的职责：\n"
+        "首帧职责：\n"
         "1) 建立任务语义基线（task_profile），明确完成标准与常见误判；\n"
         "2) 给出首帧可见事实摘要（frame_summary）；\n"
         "3) 给出首帧任务进展总结（progress_summary）。\n\n"
-        "写作要求（自然语言）：\n"
-        "- task_profile: 描述任务目标、判定完成必须满足的视觉证据、以及不能误判为完成的情形。\n"
-        "- frame_summary: 只写当前帧可见事实，不要推测不可见内容。\n"
-        "- progress_summary: 总结当前离完成还差什么。\n"
-        "- 使用短句、明确主语，避免空泛词汇。\n\n"
-        "判定规则：\n"
-        "- 仅当图像中有明确视觉证据满足任务目标时，才可 terminate=true 且 status=completed。\n"
-        "- 遮挡、歧义、接近完成、疑似完成，都不能判 completed。\n\n"
-        "输出格式：\n"
+        "输出约束：\n"
+        "- 字段内容使用自然语言短句，语义明确；\n"
+        "- decision.reason 必须与当前帧可见证据一致；\n"
+        "- 仅当当前帧有明确视觉证据满足任务目标时，才可 terminate=true 且 status=completed。\n\n"
+        "输出格式（严格）：\n"
         "你必须输出严格 JSON，且只能包含以下顶层字段：\n"
         "- task_profile\n"
         "- frame_summary\n"
@@ -471,6 +474,7 @@ def build_keyframe_vlm_prompt(
     base_prompt: str,
     task_name: str,
     memory: dict[str, Any],
+    frame_interval_seconds: float | None = None,
     prompt_version: str = "v1",
     prompt_scheme: str = "scheme1",
 ) -> str:
@@ -479,12 +483,14 @@ def build_keyframe_vlm_prompt(
             base_prompt=base_prompt,
             task_name=task_name,
             memory=memory,
+            frame_interval_seconds=frame_interval_seconds,
             prompt_version=prompt_version,
         )
     return build_keyframe_vlm_prompt_scheme1(
         base_prompt=base_prompt,
         task_name=task_name,
         memory=memory,
+        frame_interval_seconds=frame_interval_seconds,
         prompt_version=prompt_version,
     )
 
@@ -493,40 +499,33 @@ def build_keyframe_vlm_prompt_scheme1(
     base_prompt: str,
     task_name: str,
     memory: dict[str, Any],
+    frame_interval_seconds: float | None = None,
     prompt_version: str = "v1",
 ) -> str:
-    task_profile = str(memory.get("task_profile", "")).strip() or "无"
-    running_summary = str(memory.get("running_summary", "")).strip() or "无"
-    recent_history = memory.get("recent_history", [])
-    history_text = "\n".join(
-        f"- {item}" for item in recent_history if isinstance(item, str) and item.strip()
+    interval_text = (
+        f"{frame_interval_seconds:.2f} 秒"
+        if isinstance(frame_interval_seconds, (int, float))
+        and frame_interval_seconds > 0
+        else "未知"
     )
-    if not history_text:
-        history_text = "- 无"
-
     return (
         f"{base_prompt}\n\n"
-        "阶段：keyframe_update（关键帧更新）\n"
+        "阶段：keyframe_update（关键帧增量更新）\n"
         f"prompt_version: {prompt_version}\n"
-        f"任务描述：{task_name}\n"
-        f"task_profile: {task_profile}\n"
-        f"running_summary: {running_summary}\n"
-        f"recent_history:\n{history_text}\n\n"
-        "你的职责：\n"
-        "1) 基于当前帧图像，输出新的 frame_summary（当前可见事实）；\n"
-        "2) 对比 running_summary 与 recent_history，输出 change_summary（这一关键帧相对历史的变化）；\n"
-        "3) 结合本帧证据和历史文本，输出更新后的 progress_summary；\n"
-        "4) 输出 decision。\n\n"
-        "写作要求（自然语言）：\n"
-        "- frame_summary: 强调任务相关可见事实，不要罗列无关背景。\n"
-        "- change_summary: 明确“发生了什么变化/没有变化”。\n"
-        "- progress_summary: 必须体现“当前状态 + 未完成项/完成依据”。\n"
-        "- 若看不清或证据不足，必须在 change_summary 或 progress_summary 中明确写出不确定性来源。\n\n"
-        "判定规则：\n"
-        "- 只有当前帧证据与任务目标明确对齐时，才可 decision.status=completed。\n"
-        "- 不允许仅因历史文本猜测完成。\n"
-        "- 若与历史描述冲突，应在 change_summary 中指出冲突，并保守判定。\n\n"
-        "输出格式：\n"
+        "补充信息：\n"
+        "- 这是下一帧图像；\n"
+        f"- 与上一帧间隔约 {interval_text}；\n"
+        f"- 当前任务描述：{task_name}\n\n"
+        "请在已有会话上下文基础上，仅做增量更新：\n"
+        "1) frame_summary：当前帧关键可见事实；\n"
+        "2) change_summary：相对上一轮状态的变化或无变化；\n"
+        "3) progress_summary：更新后的任务进展；\n"
+        "4) decision：完成判定。\n\n"
+        "约束：\n"
+        "- 证据不足或遮挡时保持保守；\n"
+        "- 不能仅基于历史文字判定 completed；\n"
+        "- decision.reason 必须与当前帧证据一致。\n\n"
+        "输出格式（严格）：\n"
         "你必须输出严格 JSON，且只能包含以下顶层字段：\n"
         "- frame_summary\n"
         "- change_summary\n"
@@ -540,34 +539,34 @@ def build_keyframe_vlm_prompt_scheme2(
     base_prompt: str,
     task_name: str,
     memory: dict[str, Any],
+    frame_interval_seconds: float | None = None,
     prompt_version: str = "v1",
 ) -> str:
-    task_profile = str(memory.get("task_profile", "")).strip() or "无"
-    running_summary = str(memory.get("running_summary", "")).strip() or "无"
+    interval_text = (
+        f"{frame_interval_seconds:.2f} 秒"
+        if isinstance(frame_interval_seconds, (int, float))
+        and frame_interval_seconds > 0
+        else "未知"
+    )
     return (
         f"{base_prompt}\n\n"
-        "阶段：keyframe_update（关键帧更新）\n"
+        "阶段：keyframe_update（关键帧增量更新）\n"
         "prompt_scheme: scheme2\n"
         f"prompt_version: {prompt_version}\n"
-        f"任务描述：{task_name}\n"
-        f"task_profile: {task_profile}\n"
-        f"running_summary: {running_summary}\n\n"
-        "输入约束：\n"
-        "- 你现在只能使用当前图像和 running_summary 更新任务状态；\n"
-        "- 不提供 recent_history 文本；\n"
-        "- 你必须把 running_summary 视作“已有动作/状态轨迹”，输出更新后的完整轨迹。\n\n"
+        "补充信息：\n"
+        "- 这是下一帧图像；\n"
+        f"- 与上一帧间隔约 {interval_text}；\n"
+        f"- 当前任务描述：{task_name}\n\n"
         "更新目标：\n"
         "1) frame_summary：当前帧可见事实（2-5句，任务相关）；\n"
-        "2) change_summary：相对 running_summary 的新增变化（1-3句）；\n"
-        "3) progress_summary：更新后的任务进度轨迹（2-6句），应连续描述机械臂动作历史与物体变化历史；\n"
-        "   可以省略无变化项，突出关键变化链。\n"
-        "   例如：悬停 -> 下探 -> 抓取目标 -> 搬运 -> 释放 -> 目标进入容器。\n"
+        "2) change_summary：相对上一轮状态的新增变化（1-3句）；\n"
+        "3) progress_summary：更新后的任务进展轨迹（2-6句），突出关键变化链；\n"
         "4) decision：是否完成。\n\n"
-        "判定规则：\n"
-        "- completed 必须由当前帧证据支持，不能仅凭历史推断。\n"
-        "- 遮挡/证据不足/仅接近完成时，必须保持 in_progress 或 uncertain。\n"
-        "- 若与历史轨迹冲突，在 change_summary 中明确指出冲突并保守判定。\n\n"
-        "输出格式：\n"
+        "约束：\n"
+        "- completed 必须由当前帧证据支持，不能仅凭历史推断；\n"
+        "- 遮挡/证据不足/仅接近完成时，保持 in_progress 或 uncertain；\n"
+        "- 若与历史轨迹冲突，在 change_summary 中指出冲突并保守判定。\n\n"
+        "输出格式（严格）：\n"
         "你必须输出严格 JSON，且只能包含以下顶层字段：\n"
         "- frame_summary\n"
         "- change_summary\n"

@@ -90,6 +90,7 @@ def run_single_task_eval(
     vlm_keyframe_prompt_version: str = "v1",
     vlm_prompt_scheme: str = "scheme1",
     vlm_keyframe_include_prev_image: bool = False,
+    vlm_frame_interval_seconds: float = 0.0,
 ) -> dict[str, Any]:
     """Run a single-task LIBERO-10 evaluation loop without Ray workers."""
     from omegaconf import open_dict
@@ -161,6 +162,7 @@ def run_single_task_eval(
     )
     if env_cfg.video_cfg.save_video:
         env = RecordVideo(env, env_cfg.video_cfg)
+    env_fps = float(getattr(env, "_fps", 30))
 
     model_cfg = copy.deepcopy(cfg.actor.model)
     model = get_model(model_cfg)
@@ -221,7 +223,7 @@ def run_single_task_eval(
                     if frames:
                         writer = imageio.get_writer(
                             str(episode_video_path),
-                            fps=getattr(env, "_fps", 30),
+                            fps=env_fps,
                         )
                         try:
                             for frame in frames:
@@ -331,10 +333,19 @@ def run_single_task_eval(
                                     "Contextual VLM check requires obs['main_images'] to exist."
                                 )
                             memory_before = snapshot_episode_memory(episode_memory)
+                            estimated_frame_interval_seconds = float(
+                                vlm_check_interval / max(1.0, env_fps)
+                            )
+                            effective_frame_interval_seconds = (
+                                float(vlm_frame_interval_seconds)
+                                if vlm_frame_interval_seconds > 0
+                                else estimated_frame_interval_seconds
+                            )
                             task_prompt = build_keyframe_vlm_prompt(
                                 base_prompt=vlm_prompt,
                                 task_name=task_name,
                                 memory=memory_before,
+                                frame_interval_seconds=effective_frame_interval_seconds,
                                 prompt_version=vlm_keyframe_prompt_version,
                                 prompt_scheme=vlm_prompt_scheme,
                             )
@@ -372,6 +383,7 @@ def run_single_task_eval(
                                 "prompt_version": vlm_keyframe_prompt_version,
                                 "prompt_scheme": vlm_prompt_scheme,
                                 "include_previous_image": vlm_keyframe_include_prev_image,
+                                "frame_interval_seconds": effective_frame_interval_seconds,
                                 "episode_memory_after": memory_after,
                                 "parse_ok": vlm_task_state["parse_ok"],
                                 "raw_text": vlm_task_state["raw_text"],
@@ -594,6 +606,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include previous keyframe image as reference in keyframe VLM requests.",
     )
+    parser.add_argument(
+        "--vlm-frame-interval-seconds",
+        type=float,
+        default=0.0,
+        help=(
+            "Frame interval in seconds used in keyframe prompt context. "
+            "Set <=0 to auto-estimate by vlm_check_interval / env fps."
+        ),
+    )
     return parser
 
 
@@ -633,6 +654,7 @@ def main() -> None:
         vlm_keyframe_prompt_version=args.vlm_keyframe_prompt_version,
         vlm_prompt_scheme=args.vlm_prompt_scheme,
         vlm_keyframe_include_prev_image=args.vlm_keyframe_include_prev_image,
+        vlm_frame_interval_seconds=args.vlm_frame_interval_seconds,
     )
 
     print(f"Task {results['task_id']}: {results['task_name']} (seed={results['seed']})")
