@@ -88,7 +88,6 @@ def run_single_task_eval(
     vlm_timeout: float = 30.0,
     vlm_bootstrap_prompt_version: str = "v1",
     vlm_keyframe_prompt_version: str = "v1",
-    vlm_prompt_scheme: str = "scheme1",
     vlm_keyframe_include_prev_image: bool = False,
     vlm_frame_interval_seconds: float = 0.0,
 ) -> dict[str, Any]:
@@ -332,7 +331,6 @@ def run_single_task_eval(
                                 raise ValueError(
                                     "Contextual VLM check requires obs['main_images'] to exist."
                                 )
-                            memory_before = snapshot_episode_memory(episode_memory)
                             estimated_frame_interval_seconds = float(
                                 vlm_check_interval / max(1.0, env_fps)
                             )
@@ -344,10 +342,8 @@ def run_single_task_eval(
                             task_prompt = build_keyframe_vlm_prompt(
                                 base_prompt=vlm_prompt,
                                 task_name=task_name,
-                                memory=memory_before,
                                 frame_interval_seconds=effective_frame_interval_seconds,
                                 prompt_version=vlm_keyframe_prompt_version,
-                                prompt_scheme=vlm_prompt_scheme,
                             )
                             error_message = ""
                             try:
@@ -381,7 +377,6 @@ def run_single_task_eval(
                                 "phase": PARSE_MODE_KEYFRAME,
                                 "step": episode_steps,
                                 "prompt_version": vlm_keyframe_prompt_version,
-                                "prompt_scheme": vlm_prompt_scheme,
                                 "include_previous_image": vlm_keyframe_include_prev_image,
                                 "frame_interval_seconds": effective_frame_interval_seconds,
                                 "episode_memory_after": memory_after,
@@ -595,13 +590,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Version tag for keyframe prompt logic.",
     )
     parser.add_argument(
-        "--vlm-prompt-scheme",
-        type=str,
-        choices=["scheme1", "scheme2"],
-        default="scheme1",
-        help="Prompt construction scheme for keyframe updates.",
-    )
-    parser.add_argument(
         "--vlm-keyframe-include-prev-image",
         action="store_true",
         help="Include previous keyframe image as reference in keyframe VLM requests.",
@@ -652,7 +640,6 @@ def main() -> None:
         vlm_timeout=args.vlm_timeout,
         vlm_bootstrap_prompt_version=args.vlm_bootstrap_prompt_version,
         vlm_keyframe_prompt_version=args.vlm_keyframe_prompt_version,
-        vlm_prompt_scheme=args.vlm_prompt_scheme,
         vlm_keyframe_include_prev_image=args.vlm_keyframe_include_prev_image,
         vlm_frame_interval_seconds=args.vlm_frame_interval_seconds,
     )

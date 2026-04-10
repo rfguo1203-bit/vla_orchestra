@@ -17,7 +17,6 @@ from .io_and_video import encode_image_to_data_url
 VALID_DECISION_STATUS = {"in_progress", "completed", "uncertain"}
 PARSE_MODE_BOOTSTRAP = "bootstrap"
 PARSE_MODE_KEYFRAME = "keyframe"
-DEFAULT_TEXT_HISTORY_SIZE = 5
 
 
 def extract_vlm_text_content(response_payload: dict[str, Any]) -> str:
@@ -277,8 +276,6 @@ def init_episode_memory() -> dict[str, Any]:
     return {
         "task_profile": "",
         "running_summary": "",
-        "recent_history": [],
-        "history_size": DEFAULT_TEXT_HISTORY_SIZE,
     }
 
 
@@ -373,8 +370,6 @@ def snapshot_episode_memory(memory: dict[str, Any]) -> dict[str, Any]:
     return {
         "task_profile": str(memory.get("task_profile", "")),
         "running_summary": str(memory.get("running_summary", "")),
-        "recent_history": list(memory.get("recent_history", [])),
-        "history_size": int(memory.get("history_size", DEFAULT_TEXT_HISTORY_SIZE)),
     }
 
 
@@ -390,15 +385,6 @@ def should_terminate_from_task_state(
     )
 
 
-def _append_recent_history(memory: dict[str, Any], text: str) -> None:
-    if not isinstance(text, str) or not text.strip():
-        return
-    recent_history = list(memory.get("recent_history", []))
-    recent_history.append(text.strip())
-    history_size = max(1, int(memory.get("history_size", DEFAULT_TEXT_HISTORY_SIZE)))
-    memory["recent_history"] = recent_history[-history_size:]
-
-
 def update_episode_memory(memory: dict[str, Any], task_state: dict[str, Any]) -> None:
     if not task_state.get("parse_ok", False):
         return
@@ -407,20 +393,16 @@ def update_episode_memory(memory: dict[str, Any], task_state: dict[str, Any]) ->
     if parse_mode == PARSE_MODE_BOOTSTRAP:
         task_profile = task_state.get("task_profile", "")
         progress_summary = task_state.get("progress_summary", "")
-        frame_summary = task_state.get("frame_summary", "")
         if isinstance(task_profile, str) and task_profile.strip():
             memory["task_profile"] = task_profile.strip()
         if isinstance(progress_summary, str) and progress_summary.strip():
             memory["running_summary"] = progress_summary.strip()
-        _append_recent_history(memory, frame_summary)
         return
 
     if parse_mode == PARSE_MODE_KEYFRAME:
         progress_summary = task_state.get("progress_summary", "")
-        frame_summary = task_state.get("frame_summary", "")
         if isinstance(progress_summary, str) and progress_summary.strip():
             memory["running_summary"] = progress_summary.strip()
-        _append_recent_history(memory, frame_summary)
 
 
 def build_failed_task_state(
@@ -473,32 +455,6 @@ def build_bootstrap_vlm_prompt(
 def build_keyframe_vlm_prompt(
     base_prompt: str,
     task_name: str,
-    memory: dict[str, Any],
-    frame_interval_seconds: float | None = None,
-    prompt_version: str = "v1",
-    prompt_scheme: str = "scheme1",
-) -> str:
-    if prompt_scheme == "scheme2":
-        return build_keyframe_vlm_prompt_scheme2(
-            base_prompt=base_prompt,
-            task_name=task_name,
-            memory=memory,
-            frame_interval_seconds=frame_interval_seconds,
-            prompt_version=prompt_version,
-        )
-    return build_keyframe_vlm_prompt_scheme1(
-        base_prompt=base_prompt,
-        task_name=task_name,
-        memory=memory,
-        frame_interval_seconds=frame_interval_seconds,
-        prompt_version=prompt_version,
-    )
-
-
-def build_keyframe_vlm_prompt_scheme1(
-    base_prompt: str,
-    task_name: str,
-    memory: dict[str, Any],
     frame_interval_seconds: float | None = None,
     prompt_version: str = "v1",
 ) -> str:
@@ -525,47 +481,6 @@ def build_keyframe_vlm_prompt_scheme1(
         "- 证据不足或遮挡时保持保守；\n"
         "- 不能仅基于历史文字判定 completed；\n"
         "- decision.reason 必须与当前帧证据一致。\n\n"
-        "输出格式（严格）：\n"
-        "你必须输出严格 JSON，且只能包含以下顶层字段：\n"
-        "- frame_summary\n"
-        "- change_summary\n"
-        "- progress_summary\n"
-        "- decision（包含 terminate/status/reason）\n"
-        "decision.status 只能是 in_progress/completed/uncertain。"
-    )
-
-
-def build_keyframe_vlm_prompt_scheme2(
-    base_prompt: str,
-    task_name: str,
-    memory: dict[str, Any],
-    frame_interval_seconds: float | None = None,
-    prompt_version: str = "v1",
-) -> str:
-    interval_text = (
-        f"{frame_interval_seconds:.2f} 秒"
-        if isinstance(frame_interval_seconds, (int, float))
-        and frame_interval_seconds > 0
-        else "未知"
-    )
-    return (
-        f"{base_prompt}\n\n"
-        "阶段：keyframe_update（关键帧增量更新）\n"
-        "prompt_scheme: scheme2\n"
-        f"prompt_version: {prompt_version}\n"
-        "补充信息：\n"
-        "- 这是下一帧图像；\n"
-        f"- 与上一帧间隔约 {interval_text}；\n"
-        f"- 当前任务描述：{task_name}\n\n"
-        "更新目标：\n"
-        "1) frame_summary：当前帧可见事实（2-5句，任务相关）；\n"
-        "2) change_summary：相对上一轮状态的新增变化（1-3句）；\n"
-        "3) progress_summary：更新后的任务进展轨迹（2-6句），突出关键变化链；\n"
-        "4) decision：是否完成。\n\n"
-        "约束：\n"
-        "- completed 必须由当前帧证据支持，不能仅凭历史推断；\n"
-        "- 遮挡/证据不足/仅接近完成时，保持 in_progress 或 uncertain；\n"
-        "- 若与历史轨迹冲突，在 change_summary 中指出冲突并保守判定。\n\n"
         "输出格式（严格）：\n"
         "你必须输出严格 JSON，且只能包含以下顶层字段：\n"
         "- frame_summary\n"

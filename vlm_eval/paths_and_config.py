@@ -57,7 +57,6 @@ DEFAULT_VLM_PROMPT = """
 - decision.status 只能是 in_progress/completed/uncertain。
 - decision.reason 必须简短且与当前帧证据一致。
 """.strip()
-DEFAULT_VLM_HISTORY_SIZE = 3
 
 
 def set_runtime_env() -> None:
