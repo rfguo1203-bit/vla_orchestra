@@ -421,7 +421,31 @@ def build_bootstrap_vlm_prompt(
     base_prompt: str,
     task_name: str,
     prompt_version: str = "v1",
+    prompt_language: str = "zh",
 ) -> str:
+    normalized_language = (prompt_language or "zh").strip().lower()
+    if normalized_language == "en":
+        return (
+            f"{base_prompt}\n\n"
+            "Current phase: bootstrap (first-frame initialization)\n"
+            f"Overall task description: {task_name}\n\n"
+            "First-frame responsibilities:\n"
+            "1) Build a semantic task baseline (task_profile) and clarify completion criteria.\n"
+            "2) Provide a visible-facts summary for the first frame (frame_summary).\n"
+            "3) Provide a first-frame task progress summary (progress_summary).\n\n"
+            "Output constraints:\n"
+            "- Use short, clear natural-language sentences for each field.\n"
+            "- decision.reason must be consistent with visible evidence in the current frame.\n"
+            "- Set terminate=true and status=completed only when there is clear visual evidence that the task goal is satisfied.\n\n"
+            "Output format (strict):\n"
+            "You must output strict JSON and only include the following top-level fields:\n"
+            "- task_profile: natural-language description of the required robot operations, relevant objects, and task-step decomposition\n"
+            "- frame_summary: image-state summary aligned with your role objective\n"
+            "- progress_summary: current task progress\n"
+            "- decision: (contains terminate/status/reason)\n"
+            "decision.status must be one of in_progress/completed/uncertain."
+        )
+
     return (
         f"{base_prompt}\n\n"
         "当前阶段：bootstrap（首帧初始化）\n"
@@ -449,13 +473,41 @@ def build_keyframe_vlm_prompt(
     task_name: str,
     frame_interval_seconds: float | None = None,
     prompt_version: str = "v1",
+    prompt_language: str = "zh",
 ) -> str:
+    normalized_language = (prompt_language or "zh").strip().lower()
     interval_text = (
-        f"{frame_interval_seconds:.2f} 秒"
+        f"{frame_interval_seconds:.2f} seconds"
+        if normalized_language == "en"
+        and isinstance(frame_interval_seconds, (int, float))
+        and frame_interval_seconds > 0
+        else f"{frame_interval_seconds:.2f} 秒"
         if isinstance(frame_interval_seconds, (int, float))
         and frame_interval_seconds > 0
+        else "unknown"
+        if normalized_language == "en"
         else "未知"
     )
+    if normalized_language == "en":
+        return (
+            "Current phase: keyframe_update (incremental keyframe update)\n"
+            "- This is the next frame image.\n"
+            f"- The interval from the previous frame is about {interval_text}.\n"
+            f"- The current task is: {task_name}\n\n"
+            "Based on your role objective, summarize the current frame as follows:\n"
+            "1) frame_summary: summarize the image state aligned with your role objective.\n"
+            "2) change_summary: describe what changed in this frame compared with the previous frame.\n"
+            "3) progress_summary: infer task progress based on the current frame.\n"
+            "4) decision: make a completion-state judgment.\n\n"
+            "Output format (strict):\n"
+            "You must output strict JSON and only include the following top-level fields:\n"
+            "- frame_summary\n"
+            "- change_summary\n"
+            "- progress_summary\n"
+            "- decision (contains terminate/status/reason)\n"
+            "decision.status must be one of in_progress/completed/uncertain."
+        )
+
     return (
         # f"{base_prompt}\n\n"
         "当前阶段：keyframe_update（关键帧增量更新）\n"

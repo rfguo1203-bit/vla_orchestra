@@ -40,7 +40,7 @@ def resolve_rlinf_repo_root() -> Path:
 REPO_ROOT = resolve_rlinf_repo_root()
 EMBODIED_PATH = REPO_ROOT / "examples" / "embodiment"
 DEFAULT_CONFIG_NAME = "libero_10_ppo_openpi_pi05"
-DEFAULT_VLM_PROMPT = """
+DEFAULT_VLM_PROMPT_ZH = """
 角色设定：
 - 你是机器人任务状态分析器，不是机器人控制器；
 - 你现在正在观察一个机器人完成某项任务，你会以固定的时间间隔收到一张第三视角观察机器人的图像。
@@ -54,6 +54,36 @@ DEFAULT_VLM_PROMPT = """
 - 证据不足时应当保守，不能因接近完成而判定完成。
 
 """.strip()
+
+DEFAULT_VLM_PROMPT_EN = """
+Role:
+- You are a robot task-state analyzer, not a robot controller.
+- You are observing a robot performing a task and will receive one third-person image at fixed time intervals.
+- Your overall goal is to determine whether the robot has completed the task based on these images. You should track task progress stably, not generate action suggestions.
+- To achieve this, analyze key information in each image and consolidate it into task progress.
+- Tasks are not always fixed, so you should actively identify task-relevant signals, reason about the relation between the current image and historical progress, and infer the robot motion state and robot-object interactions.
+
+Constraints:
+- You can only judge based on the current image and historical context.
+- You may cautiously reason about occlusion and infer objects that are partially hidden.
+- If evidence is insufficient, stay conservative and do not mark completion just because it looks close.
+
+""".strip()
+
+DEFAULT_VLM_PROMPTS = {
+    "zh": DEFAULT_VLM_PROMPT_ZH,
+    "en": DEFAULT_VLM_PROMPT_EN,
+}
+
+
+def get_default_vlm_prompt(language: str) -> str:
+    normalized = (language or "zh").strip().lower()
+    if normalized not in DEFAULT_VLM_PROMPTS:
+        normalized = "zh"
+    return DEFAULT_VLM_PROMPTS[normalized]
+
+
+DEFAULT_VLM_PROMPT = get_default_vlm_prompt("zh")
 
 
 def set_runtime_env() -> None:

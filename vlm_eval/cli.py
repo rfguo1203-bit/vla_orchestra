@@ -6,7 +6,7 @@ import argparse
 
 from .eval_runner import run_single_task_eval
 from .libero_tasking import load_libero10_metadata, resolve_task_id
-from .paths_and_config import DEFAULT_CONFIG_NAME, DEFAULT_VLM_PROMPT
+from .paths_and_config import DEFAULT_CONFIG_NAME, get_default_vlm_prompt
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -114,10 +114,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional x-auth-token header used by the VLM endpoint.",
     )
     parser.add_argument(
+        "--vlm-prompt-lang",
+        type=str,
+        choices=("zh", "en"),
+        default="zh",
+        help="Language for the default VLM prompt template (used when --vlm-prompt is not set).",
+    )
+    parser.add_argument(
         "--vlm-prompt",
         type=str,
-        default=DEFAULT_VLM_PROMPT,
-        help="Prompt template used for contextual VLM checks.",
+        default=None,
+        help="Prompt template used for contextual VLM checks. If omitted, uses --vlm-prompt-lang.",
     )
     parser.add_argument(
         "--vlm-timeout",
@@ -168,6 +175,7 @@ def main() -> None:
         task_id=args.task_id,
         task_name=args.task_name,
     )
+    resolved_vlm_prompt = args.vlm_prompt or get_default_vlm_prompt(args.vlm_prompt_lang)
     results = run_single_task_eval(
         task_id=selected_task_id,
         config_name=args.config_name,
@@ -184,7 +192,8 @@ def main() -> None:
         vlm_api_key=args.vlm_api_key,
         vlm_x_auth_token=args.vlm_x_auth_token,
         vlm_model=args.vlm_model,
-        vlm_prompt=args.vlm_prompt,
+        vlm_prompt=resolved_vlm_prompt,
+        vlm_prompt_lang=args.vlm_prompt_lang,
         vlm_timeout=args.vlm_timeout,
         vlm_bootstrap_prompt_version=args.vlm_bootstrap_prompt_version,
         vlm_keyframe_prompt_version=args.vlm_keyframe_prompt_version,

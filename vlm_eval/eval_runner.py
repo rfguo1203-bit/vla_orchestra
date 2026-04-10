@@ -260,6 +260,7 @@ def _run_bootstrap_vlm_check(
     vlm_x_auth_token: str | None,
     vlm_model: str | None,
     vlm_prompt: str,
+    vlm_prompt_lang: str,
     vlm_timeout: float,
     vlm_bootstrap_prompt_version: str,
 ) -> None:
@@ -271,6 +272,7 @@ def _run_bootstrap_vlm_check(
         base_prompt=vlm_prompt,
         task_name=task_name,
         prompt_version=vlm_bootstrap_prompt_version,
+        prompt_language=vlm_prompt_lang,
     )
     bootstrap_error = ""
     try:
@@ -326,6 +328,7 @@ def _run_keyframe_vlm_check(
     vlm_x_auth_token: str | None,
     vlm_model: str | None,
     vlm_prompt: str,
+    vlm_prompt_lang: str,
     vlm_timeout: float,
     vlm_keyframe_prompt_version: str,
     vlm_keyframe_include_prev_image: bool,
@@ -346,6 +349,7 @@ def _run_keyframe_vlm_check(
         task_name=task_name,
         frame_interval_seconds=effective_frame_interval_seconds,
         prompt_version=vlm_keyframe_prompt_version,
+        prompt_language=vlm_prompt_lang,
     )
     error_message = ""
     try:
@@ -416,6 +420,7 @@ def _maybe_run_vlm_check(
     vlm_x_auth_token: str | None,
     vlm_model: str | None,
     vlm_prompt: str,
+    vlm_prompt_lang: str,
     vlm_timeout: float,
     vlm_keyframe_prompt_version: str,
     vlm_keyframe_include_prev_image: bool,
@@ -441,6 +446,7 @@ def _maybe_run_vlm_check(
         vlm_x_auth_token=vlm_x_auth_token,
         vlm_model=vlm_model,
         vlm_prompt=vlm_prompt,
+        vlm_prompt_lang=vlm_prompt_lang,
         vlm_timeout=vlm_timeout,
         vlm_keyframe_prompt_version=vlm_keyframe_prompt_version,
         vlm_keyframe_include_prev_image=vlm_keyframe_include_prev_image,
@@ -462,6 +468,7 @@ def _step_episode_loop(
     vlm_x_auth_token: str | None,
     vlm_model: str | None,
     vlm_prompt: str,
+    vlm_prompt_lang: str,
     vlm_timeout: float,
     vlm_keyframe_prompt_version: str,
     vlm_keyframe_include_prev_image: bool,
@@ -516,6 +523,7 @@ def _step_episode_loop(
                     vlm_x_auth_token=vlm_x_auth_token,
                     vlm_model=vlm_model,
                     vlm_prompt=vlm_prompt,
+                    vlm_prompt_lang=vlm_prompt_lang,
                     vlm_timeout=vlm_timeout,
                     vlm_keyframe_prompt_version=vlm_keyframe_prompt_version,
                     vlm_keyframe_include_prev_image=vlm_keyframe_include_prev_image,
@@ -553,6 +561,7 @@ def _run_single_episode(
     vlm_x_auth_token: str | None,
     vlm_model: str | None,
     vlm_prompt: str,
+    vlm_prompt_lang: str,
     vlm_timeout: float,
     vlm_bootstrap_prompt_version: str,
     vlm_keyframe_prompt_version: str,
@@ -588,6 +597,7 @@ def _run_single_episode(
             vlm_x_auth_token=vlm_x_auth_token,
             vlm_model=vlm_model,
             vlm_prompt=vlm_prompt,
+            vlm_prompt_lang=vlm_prompt_lang,
             vlm_timeout=vlm_timeout,
             vlm_bootstrap_prompt_version=vlm_bootstrap_prompt_version,
         )
@@ -605,6 +615,7 @@ def _run_single_episode(
         vlm_x_auth_token=vlm_x_auth_token,
         vlm_model=vlm_model,
         vlm_prompt=vlm_prompt,
+        vlm_prompt_lang=vlm_prompt_lang,
         vlm_timeout=vlm_timeout,
         vlm_keyframe_prompt_version=vlm_keyframe_prompt_version,
         vlm_keyframe_include_prev_image=vlm_keyframe_include_prev_image,
@@ -663,6 +674,7 @@ def run_single_task_eval(
     vlm_x_auth_token: str | None = None,
     vlm_model: str | None = None,
     vlm_prompt: str = DEFAULT_VLM_PROMPT,
+    vlm_prompt_lang: str = "zh",
     vlm_timeout: float = 30.0,
     vlm_bootstrap_prompt_version: str = "v1",
     vlm_keyframe_prompt_version: str = "v1",
@@ -705,6 +717,7 @@ def run_single_task_eval(
                 vlm_x_auth_token=vlm_x_auth_token,
                 vlm_model=vlm_model,
                 vlm_prompt=vlm_prompt,
+                vlm_prompt_lang=vlm_prompt_lang,
                 vlm_timeout=vlm_timeout,
                 vlm_bootstrap_prompt_version=vlm_bootstrap_prompt_version,
                 vlm_keyframe_prompt_version=vlm_keyframe_prompt_version,
