@@ -457,8 +457,8 @@ def build_keyframe_vlm_prompt(
         else "未知"
     )
     return (
-        f"{base_prompt}\n\n"
-        "阶段当前：keyframe_update（关键帧增量更新）\n"
+        # f"{base_prompt}\n\n"
+        "当前阶段：keyframe_update（关键帧增量更新）\n"
         "- 这是下一帧图像；\n"
         f"- 与上一帧间隔约为 {interval_text}；\n"
         f"- 当前正在进行的任务是：{task_name}\n\n"
