@@ -71,6 +71,7 @@ class EvalRuntime:
 @dataclass
 class EpisodePaths:
     video_path: Path | None
+    vlm_video_path: Path
     json_path: Path
 
 
@@ -85,6 +86,7 @@ class EpisodeState:
     termination_reason: str
     memory_trace: list[dict[str, Any]]
     previous_keyframe_image: Any | None
+    vlm_inference_frames: list[Any]
 
 
 def _build_runtime(
@@ -205,6 +207,7 @@ def _build_episode_state() -> EpisodeState:
         termination_reason="",
         memory_trace=[],
         previous_keyframe_image=None,
+        vlm_inference_frames=[],
     )
 
 
@@ -224,13 +227,23 @@ def _build_episode_paths(runtime: EvalRuntime, episode_idx: int) -> EpisodePaths
         if video_path is not None
         else runtime.output_session_dir / f"episode_{episode_idx}.json"
     )
-    return EpisodePaths(video_path=video_path, json_path=json_path)
+    vlm_video_path = (
+        video_path.with_name(f"{video_path.stem}_vlm{video_path.suffix}")
+        if video_path is not None
+        else runtime.output_session_dir / f"episode_{episode_idx}_vlm.mp4"
+    )
+    return EpisodePaths(
+        video_path=video_path,
+        vlm_video_path=vlm_video_path,
+        json_path=json_path,
+    )
 
 
 def _save_episode_checkpoint(
     runtime: EvalRuntime,
     paths: EpisodePaths,
     memory_trace: list[dict[str, Any]],
+    vlm_inference_frames: list[Any],
 ) -> None:
     import imageio
 
@@ -247,6 +260,16 @@ def _save_episode_checkpoint(
                     writer.append_data(frame)
             finally:
                 writer.close()
+    if vlm_inference_frames:
+        writer = imageio.get_writer(
+            str(paths.vlm_video_path),
+            fps=1.0,
+        )
+        try:
+            for frame in vlm_inference_frames:
+                writer.append_data(frame)
+        finally:
+            writer.close()
     with open(paths.json_path, "w") as fp:
         json.dump(memory_trace, fp, indent=2, ensure_ascii=False)
 
@@ -269,6 +292,7 @@ def _run_bootstrap_vlm_check(
     base_image = extract_base_image(obs)
     if base_image is None:
         raise ValueError("Bootstrap VLM check requires obs['main_images'] to exist.")
+    episode_state.vlm_inference_frames.append(copy.deepcopy(base_image))
     wrist_image = extract_wrist_image(obs) if vlm_include_wrist_image else None
 
     bootstrap_prompt = build_bootstrap_vlm_prompt(
@@ -343,6 +367,7 @@ def _run_keyframe_vlm_check(
     base_image = extract_base_image(obs)
     if base_image is None:
         raise ValueError("Contextual VLM check requires obs['main_images'] to exist.")
+    episode_state.vlm_inference_frames.append(copy.deepcopy(base_image))
     wrist_image = extract_wrist_image(obs) if vlm_include_wrist_image else None
 
     estimated_frame_interval_seconds = float(vlm_check_interval / max(1.0, env_fps))
@@ -553,6 +578,7 @@ def _step_episode_loop(
                         runtime,
                         episode_paths,
                         episode_state.memory_trace,
+                        episode_state.vlm_inference_frames,
                     )
                 if episode_state.done:
                     break
@@ -639,6 +665,7 @@ def _run_single_episode(
     )
 
     video_path = None
+    did_save_checkpoint = False
     if episode_idx in runtime.save_video_indices and isinstance(
         runtime.env, runtime.record_video_cls
     ):
@@ -646,7 +673,9 @@ def _run_single_episode(
             runtime,
             episode_paths,
             episode_state.memory_trace,
+            episode_state.vlm_inference_frames,
         )
+        did_save_checkpoint = True
         video_path = episode_paths.video_path
         if video_path is not None:
             saved_video_paths.append(str(video_path))
@@ -663,12 +692,19 @@ def _run_single_episode(
         "memory_trace": episode_state.memory_trace,
         "episode_memory": snapshot_episode_memory(episode_state.memory),
         "video_path": str(video_path) if video_path is not None else None,
+        "vlm_video_path": (
+            str(episode_paths.vlm_video_path)
+            if episode_state.vlm_inference_frames
+            else None
+        ),
     }
-    if video_path is None and save_every_steps > 0:
+    should_save_final_vlm_video = bool(episode_state.vlm_inference_frames)
+    if not did_save_checkpoint and (save_every_steps > 0 or should_save_final_vlm_video):
         _save_episode_checkpoint(
             runtime,
             episode_paths,
             episode_state.memory_trace,
+            episode_state.vlm_inference_frames,
         )
     return episode_result
 
