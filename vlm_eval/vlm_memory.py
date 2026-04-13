@@ -81,7 +81,6 @@ def empty_bootstrap_task_state(
         "parse_mode": PARSE_MODE_BOOTSTRAP,
         "task_profile": "",
         "frame_summary": "",
-        "last_progress_summary": "",
         "progress_summary": "",
         "decision": empty_decision(),
         "raw_text": raw_text,
@@ -97,7 +96,6 @@ def empty_keyframe_task_state(
         "parse_mode": PARSE_MODE_KEYFRAME,
         "frame_summary": "",
         "change_summary": "",
-        "last_progress_summary": "",
         "progress_summary": "",
         "decision": empty_decision(),
         "raw_text": raw_text,
@@ -212,7 +210,6 @@ def parse_vlm_bootstrap_state(response_payload: dict[str, Any]) -> dict[str, Any
 
     task_profile = _normalize_text_field(parsed.get("task_profile"))
     frame_summary = _normalize_text_field(parsed.get("frame_summary"))
-    last_progress_summary = _normalize_text_field(parsed.get("last_progress_summary"))
     progress_summary = _normalize_text_field(parsed.get("progress_summary"))
 
     if not frame_summary:
@@ -232,7 +229,6 @@ def parse_vlm_bootstrap_state(response_payload: dict[str, Any]) -> dict[str, Any
     task_state = empty_bootstrap_task_state(raw_text=content, parse_ok=True)
     task_state["task_profile"] = task_profile
     task_state["frame_summary"] = frame_summary
-    task_state["last_progress_summary"] = last_progress_summary
     task_state["progress_summary"] = progress_summary
     task_state["decision"] = normalized_decision
     return task_state
@@ -249,7 +245,6 @@ def parse_vlm_keyframe_state(response_payload: dict[str, Any]) -> dict[str, Any]
 
     frame_summary = _normalize_text_field(parsed.get("frame_summary"))
     change_summary = _normalize_text_field(parsed.get("change_summary"))
-    last_progress_summary = _normalize_text_field(parsed.get("last_progress_summary"))
     progress_summary = _normalize_text_field(parsed.get("progress_summary"))
 
     if not frame_summary:
@@ -272,7 +267,6 @@ def parse_vlm_keyframe_state(response_payload: dict[str, Any]) -> dict[str, Any]
     task_state = empty_keyframe_task_state(raw_text=content, parse_ok=True)
     task_state["frame_summary"] = frame_summary
     task_state["change_summary"] = change_summary
-    task_state["last_progress_summary"] = last_progress_summary
     task_state["progress_summary"] = progress_summary
     task_state["decision"] = normalized_decision
     return task_state
@@ -449,8 +443,7 @@ def build_bootstrap_vlm_prompt(
             "Output format (strict):\n"
             "You must output strict JSON and only include the following top-level fields:\n"
             "- task_profile: in natural language, describe what operations the robot needs to perform, which objects matter, and a step/detail decomposition for this task\n"
-            "- frame_summary: summarize the image state focusing on the robot arm and task-relevant objects\n"
-            "- last_progress_summary: strict copy of the previous frame's progress_summary; for bootstrap (first frame), output an empty string\n"
+            "- frame_summary: summarize the image state for the task objective, focusing on robot-arm state/actions, the gripper pixel coordinates in the image, and the target objects' positions/states\n"
             "- progress_summary: summarize the robot arm's initial state at the first frame\n"
             "- decision: (contains terminate/status/reason)\n"
             "decision.status must be one of in_progress/completed/uncertain."
@@ -474,8 +467,7 @@ def build_bootstrap_vlm_prompt(
         "输出格式（严格）：\n"
         "对于bootstrap阶段，你必须输出严格 JSON，且只能包含以下顶层字段：\n"
         "- task_profile：自然语言描述本次任务机器人需要做哪些操作，需要关注哪些物体，做任务步骤和细节拆解\n"
-        "- frame_summary：针对机械臂和任务关注的物体对图像状态进行总结\n"
-        "- last_progress_summary：严格复制上一帧的progress_summary；在bootstrap（首帧）阶段输出空字符串\n"
+        "- frame_summary：针对任务目标对图像状态进行描述总结，关注机械臂的状态和动作，回答机械臂夹爪在图像中的像素坐标，关注目标物体位置和状态；\n"
         "- progress_summary：总结首帧时机械臂的起始状态\n"
         "- decision：（包含 terminate/status/reason）\n"
         "decision.status 只能是 in_progress/completed/uncertain。"
@@ -509,13 +501,12 @@ def build_keyframe_vlm_prompt(
             f"- The interval from the previous frame is about {interval_text};\n"
             f"- The current task is: {task_name}\n\n"
             "Based on your role objective, the current frame, and the conversation history, provide the following summaries:\n"
-            "1) frame_summary: summarize the image state for the task objective, focusing on the robot-arm state/actions and target-object state;\n"
-            "2) progress_summary: based on the previous progress_summary, append an incremental summary of the robot arm's action history and task state so far, e.g., robot arm moves to a position, robot arm lowers, robot arm grasps an object, robot arm moves an object, robot arm moves to another position, ...;\n"
+            "1) frame_summary: summarize the image state for the task objective, focusing on robot-arm state/actions, the gripper pixel coordinates in the image, and the target objects' positions/states;\n"
+            "2) progress_summary: based on the previous progress_summary, append an incremental summary of the robot arm's action history and task state so far, for example: 1) robot arm moves to a position, 2) robot arm lowers, 3) robot arm grasps an object, 4) robot arm moves an object, 5) robot arm moves to another position, ...;\n"
             "3) decision: make a completion-state judgment.\n\n"
             "Output format (strict):\n"
             "You must output strict JSON and only include the following top-level fields:\n"
             "- frame_summary\n"
-            "- last_progress_summary: strict copy of the previous frame's progress_summary\n"
             "- progress_summary\n"
             "- decision (contains terminate/status/reason)\n"
             "decision.status must be one of in_progress/completed/uncertain."
@@ -528,13 +519,12 @@ def build_keyframe_vlm_prompt(
         f"- 与上一帧间隔约为 {interval_text}；\n"
         f"- 当前正在进行的任务是：{task_name}\n\n"
         "你需要根据你的角色目标，基于当前帧的图像和会话记录，进行如下总结：\n"
-        "1) frame_summary：针对任务目标对图像状态进行描述总结，关注机械臂的状态和动作，关注目标物体状态；\n"
-        "2) progress_summary：在上一次总结的progess_summary的基础上，追加式地总结目前为止机械臂的动作历史和任务状态，输出比如：机械臂移动至某位置，机械臂下探，机械臂抓取某物体，机械臂移动某物体，机械臂移动至某位置......\n"
+        "1) frame_summary：针对任务目标对图像状态进行描述总结，关注机械臂的状态和动作，回答机械臂夹爪在图像中的像素坐标，关注目标物体位置和状态；\n"
+        "2) progress_summary：在上一次总结的progess_summary的基础上，追加式地总结目前为止机械臂的动作历史和任务状态，输出比如：1.机械臂移动至某位置，2.机械臂下探，3.机械臂抓取某物体，4.机械臂移动某物体，5.机械臂移动至某位置......\n"
         "3) decision：进行任务完成状态判定。\n\n"
         "输出格式（严格）：\n"
         "你必须输出严格 JSON，且只能包含以下顶层字段：\n"
         "- frame_summary\n"
-        "- last_progress_summary：严格复制上一帧的progress_summary\n"
         "- progress_summary\n"
         "- decision（包含 terminate/status/reason）\n"
         "decision.status 只能是 in_progress/completed/uncertain。"

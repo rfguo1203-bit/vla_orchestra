@@ -314,7 +314,6 @@ def _run_bootstrap_vlm_check(
         bootstrap_trace["parsed_content"] = {
             "task_profile": bootstrap_state["task_profile"],
             "frame_summary": bootstrap_state["frame_summary"],
-            "last_progress_summary": bootstrap_state["last_progress_summary"],
             "progress_summary": bootstrap_state["progress_summary"],
             "decision": bootstrap_state["decision"],
         }
@@ -404,11 +403,10 @@ def _run_keyframe_vlm_check(
         trace_record["parsed_content"] = {
             "frame_summary": vlm_task_state["frame_summary"],
             "change_summary": vlm_task_state["change_summary"],
-            "last_progress_summary": vlm_task_state["last_progress_summary"],
             "progress_summary": vlm_task_state["progress_summary"],
             "decision": vlm_task_state["decision"],
         }
-        trace_record["running_summary_after"] = memory_after.get("running_summary", "")
+        # trace_record["running_summary_after"] = memory_after.get("running_summary", "")
     episode_state.memory_trace.append(trace_record)
     if should_terminate_from_task_state(vlm_task_state, episode_state.memory):
         episode_state.done = True
