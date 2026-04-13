@@ -32,7 +32,7 @@ VLM_MODEL="${VLM_MODEL:-Qwen3.5-27B}"
 # VLM_PROMPT='You are judging whether a robot manipulation task is already complete from a single camera image. Reply with strict JSON only: {"terminate": true/false, "reason": "short reason"}. Set terminate=true only when the task goal is clearly finished in the image.'
 VLM_PROMPT=''
 VLM_PROMPT_LANG="${VLM_PROMPT_LANG:-zh}"  # supported: zh, en
-VLM_TIMEOUT=90
+VLM_TIMEOUT=120
 VLM_BOOTSTRAP_PROMPT_VERSION="${VLM_BOOTSTRAP_PROMPT_VERSION:-v1}"
 VLM_KEYFRAME_PROMPT_VERSION="${VLM_KEYFRAME_PROMPT_VERSION:-v1}"
 VLM_KEYFRAME_INCLUDE_PREV_IMAGE="${VLM_KEYFRAME_INCLUDE_PREV_IMAGE:-false}"
