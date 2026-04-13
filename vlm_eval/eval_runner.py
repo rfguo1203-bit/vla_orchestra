@@ -246,6 +246,7 @@ def _save_episode_checkpoint(
     vlm_inference_frames: list[Any],
 ) -> None:
     import imageio
+    import numpy as np
 
     runtime.output_session_dir.mkdir(parents=True, exist_ok=True)
     if paths.video_path is not None and isinstance(runtime.env, runtime.record_video_cls):
@@ -267,7 +268,23 @@ def _save_episode_checkpoint(
         )
         try:
             for frame in vlm_inference_frames:
-                writer.append_data(frame)
+                frame_array = frame
+                if hasattr(frame_array, "detach"):
+                    frame_array = frame_array.detach().cpu().numpy()
+                elif hasattr(frame_array, "cpu") and hasattr(frame_array, "numpy"):
+                    frame_array = frame_array.cpu().numpy()
+                else:
+                    frame_array = np.asarray(frame_array)
+
+                if frame_array.dtype.kind == "f":
+                    # Handle both [0, 1] and [0, 255] float images.
+                    max_value = float(np.max(frame_array)) if frame_array.size else 0.0
+                    scale = 255.0 if max_value <= 1.0 else 1.0
+                    frame_array = np.clip(frame_array * scale, 0, 255).astype(np.uint8)
+                elif frame_array.dtype != np.uint8:
+                    frame_array = np.clip(frame_array, 0, 255).astype(np.uint8)
+
+                writer.append_data(frame_array)
         finally:
             writer.close()
     with open(paths.json_path, "w") as fp:
