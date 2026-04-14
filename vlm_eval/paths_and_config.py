@@ -66,6 +66,7 @@ DEFAULT_VLM_PROMPT_ZH = """
    - “已放置”仅当能看到物体在目标区域稳定停放且夹爪已释放/离开。
 6) 若本帧没有新增可确认事实，progress_summary 可以不新增，保持原样。
 7) decision.reason 必须引用 frame_summary 中可见证据，并且参考task_profile列出的任务完成关键条件，不得引用猜测链条。
+8) 允许审慎纠偏：过往progress_summary可能包含幻觉内容；若当前及过往帧的frame_summary事实与其不一致，且经审慎判断可确认存在幻觉，可对progress_summary进行必要修正，修正内容必须仅基于可见证据与可追溯历史事实，不得二次脑补。
 
 Few-shot示例（通用任务：拿起香蕉放到盘子里）：
 示例输入上下文：
@@ -80,6 +81,23 @@ Few-shot示例（通用任务：拿起香蕉放到盘子里）：
     "terminate": false,
     "status": "in_progress",
     "reason": "frame_summary中的可见证据仅支持对位接近，尚未确认稳定抓取；task_profile要求的完成关键条件（香蕉稳定在盘子里且夹爪释放）尚未满足。"
+  }
+}
+
+Few-shot示例（纠偏场景：修正历史progress_summary中的幻觉）：
+示例输入上下文：
+- task_profile："将香蕉从桌面移动到盘子中。完成条件：香蕉稳定在盘子里且夹爪已释放。"
+- 历史frame_summary事实（最近两帧）：均显示香蕉仍在桌面、夹爪在香蕉上方对位，未见稳定抓取与共同运动。
+- 上一帧progress_summary（疑似幻觉）："1. 香蕉在桌面上。2. 已抓取香蕉。3. 正在将香蕉移动到盘子。"
+- 当前帧证据：香蕉仍在桌面，夹爪接近但未见确认夹持。
+示例输出：
+{
+  "frame_summary": "当前帧仍可见香蕉位于桌面，夹爪在香蕉上方接近/对位，未见香蕉与夹爪稳定接触并共同运动的证据。",
+  "progress_summary": "1. 香蕉在桌面上。2. 机械臂移动到香蕉上方并进行对位；抓取状态未确认。",
+  "decision": {
+    "terminate": false,
+    "status": "in_progress",
+    "reason": "根据frame_summary可见证据，尚未确认稳定抓取，且task_profile要求的完成关键条件（香蕉稳定在盘子里且夹爪释放）未满足。已对与可见事实冲突的历史progress_summary进行审慎纠偏。"
   }
 }
 
@@ -111,6 +129,7 @@ Global anti-hallucination constraints (must remain active in subsequent keyframe
    - "placed" only when you can see the object stably resting in target area and the gripper has released/moved away.
 6) If a frame has no newly verifiable fact, progress_summary may remain unchanged.
 7) decision.reason must cite visible evidence in frame_summary and reference key completion conditions from task_profile; do not use speculative chains.
+8) Conservative correction is allowed: historical progress_summary may contain hallucinations; if current and recent frame_summary facts conflict with it, and careful reasoning confirms hallucination, you may revise progress_summary as necessary. Any revision must be grounded only in visible evidence and traceable history, without adding new speculation.
 
 Few-shot example (generic task: pick up a banana and place it on a plate):
 Context:
@@ -125,6 +144,23 @@ Example output:
     "terminate": false,
     "status": "in_progress",
     "reason": "Visible evidence only supports approach/alignment and no confirmed stable grasp in frame_summary. task_profile completion conditions (banana stably on plate and gripper released) are not yet satisfied."
+  }
+}
+
+Few-shot example (correction case: fix hallucinated history in progress_summary):
+Context:
+- task_profile: "Move the banana from the table to the plate. Completion: banana is stably on plate and gripper is released."
+- recent frame_summary facts (last two frames): banana remains on table; gripper aligns above banana; no stable grasp with co-motion is visible.
+- previous progress_summary (suspected hallucination): "1. Banana is on the table. 2. Banana has been grasped. 3. Robot is moving banana to the plate."
+- current evidence: banana is still on table; gripper is approaching/aligned, but confirmed grasp is not visible.
+Example output:
+{
+  "frame_summary": "Current frame still shows banana on the table, with the gripper approaching/aligned above it; no visible evidence confirms stable contact and co-motion with the gripper.",
+  "progress_summary": "1. Banana is on the table. 2. Robot arm moves above banana for alignment; grasp remains unconfirmed.",
+  "decision": {
+    "terminate": false,
+    "status": "in_progress",
+    "reason": "Visible evidence in frame_summary does not confirm a stable grasp, and task_profile completion conditions (banana stably on plate and gripper released) are not met. Historical progress_summary is conservatively corrected where it conflicted with visible facts."
   }
 }
 
