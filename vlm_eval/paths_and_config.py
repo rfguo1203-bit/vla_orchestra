@@ -56,6 +56,33 @@ DEFAULT_VLM_PROMPT_ZH = """
 - 可以谨慎判断物体的遮挡关系，推断被遮挡物体；
 - 证据不足时应当保守，不能因接近完成而判定完成。
 
+全局抗幻觉硬约束（后续关键帧持续生效，必须遵守）：
+1) 事实优先：progress_summary 只能写“当前帧可见事实”或“由会话记录中上一帧progress_summary直接继承的事实”，不得补全不可见中间动作。
+2) 禁止脑补：若证据不足，不得写“已抓取/已放置/已移动到目标位”等确定性结论；改写为“尝试/接近/未确认”。
+3) 增量追加：progress_summary 必须在上一帧progress_summary基础上追加“最小新增事实”，不得重写整段剧情。
+4) 视角冲突保守：主视角与腕视角不一致时，需要谨慎考虑从不同视角恢复真实空间关系，同时避免猜测；若仍不确定，按“未确认”处理。
+5) 可见性门槛：
+   - “已抓取”仅当能看到夹爪与目标物体稳定接触且物体随夹爪共同运动；
+   - “已放置”仅当能看到物体在目标区域稳定停放且夹爪已释放/离开。
+6) 若本帧没有新增可确认事实，progress_summary 可以不新增，保持原样。
+7) decision.reason 必须引用 frame_summary 中可见证据，并且参考task_profile列出的任务完成关键条件，不得引用猜测链条。
+
+Few-shot示例（通用任务：拿起香蕉放到盘子里）：
+示例输入上下文：
+- task_profile："将香蕉从桌面移动到盘子中。完成条件：香蕉稳定在盘子里且夹爪已释放。"
+- 上一帧progress_summary："1. 香蕉在桌面上。2. 机械臂移动到香蕉上方。"
+- 当前帧证据：主视角看到夹爪在香蕉上方对位；腕视角主要看到盘子区域，未见明确被夹持物（存在遮挡）。
+示例输出：
+{
+  "frame_summary": "主视角显示夹爪在桌面香蕉上方对位；腕视角主要显示盘子区域，未见可确认的被夹持物。当前没有足够可见证据确认已稳定抓取。",
+  "progress_summary": "1. 香蕉在桌面上。2. 机械臂移动到香蕉上方。",
+  "decision": {
+    "terminate": false,
+    "status": "in_progress",
+    "reason": "frame_summary中的可见证据仅支持对位接近，尚未确认稳定抓取；task_profile要求的完成关键条件（香蕉稳定在盘子里且夹爪释放）尚未满足。"
+  }
+}
+
 """.strip()
 
 DEFAULT_VLM_PROMPT_EN = """
@@ -73,6 +100,33 @@ Constraints:
 - You can only judge based on the current image and historical context.
 - You may cautiously reason about occlusion and infer objects that are partially hidden.
 - If evidence is insufficient, stay conservative and do not mark completion just because it looks close.
+
+Global anti-hallucination constraints (must remain active in subsequent keyframes):
+1) Fact-first: progress_summary can only include facts visible in the current frame or facts directly inherited from the previous progress_summary in conversation history; do not invent unseen intermediate actions.
+2) No speculation: if evidence is insufficient, do not output certain claims like "already grasped/placed/moved to target"; use "attempting/approaching/unconfirmed" instead.
+3) Incremental minimal update: progress_summary should append only the smallest newly verifiable facts on top of previous progress_summary; do not rewrite a full storyline.
+4) Conservative multi-view reasoning: when main view and wrist view appear inconsistent, cautiously recover the likely true spatial relation across views and avoid speculation; if still uncertain, mark as unconfirmed.
+5) Visibility thresholds:
+   - "grasped" only when you can see stable contact between gripper and target object and the object moves together with the gripper;
+   - "placed" only when you can see the object stably resting in target area and the gripper has released/moved away.
+6) If a frame has no newly verifiable fact, progress_summary may remain unchanged.
+7) decision.reason must cite visible evidence in frame_summary and reference key completion conditions from task_profile; do not use speculative chains.
+
+Few-shot example (generic task: pick up a banana and place it on a plate):
+Context:
+- task_profile: "Move the banana from the table to the plate. Completion: banana is stably on plate and gripper is released."
+- previous progress_summary: "1. Banana is on the table. 2. Robot arm moves above the banana."
+- current evidence: main view shows gripper aligned above banana; wrist view mainly shows the plate area and no clearly grasped object (occlusion exists).
+Example output:
+{
+  "frame_summary": "Main view shows the gripper aligned above the banana on the table; wrist view mainly shows the plate area and no clearly grasped object. There is insufficient visible evidence for a confirmed stable grasp.",
+  "progress_summary": "1. Banana is on the table. 2. Robot arm moves above the banana.",
+  "decision": {
+    "terminate": false,
+    "status": "in_progress",
+    "reason": "Visible evidence only supports approach/alignment and no confirmed stable grasp in frame_summary. task_profile completion conditions (banana stably on plate and gripper released) are not yet satisfied."
+  }
+}
 
 """.strip()
 

@@ -496,14 +496,16 @@ def build_keyframe_vlm_prompt(
     )
     if normalized_language == "en":
         return (
+            f"{base_prompt}\n\n"
             "Current phase: keyframe_update (incremental keyframe update)\n"
             "- This is the next frame input;\n"
             f"- The interval from the previous frame is about {interval_text};\n"
             f"- The current task is: {task_name}\n\n"
             "Based on your role objective, the current frame, and the conversation history, provide the following summaries:\n"
             "1) frame_summary: summarize the image state for the task objective, focusing on robot-arm state/actions, the gripper pixel coordinates in the image, and the target objects' positions/states;\n"
-            "2) progress_summary: based on the previous progress_summary, append an incremental summary of the robot arm's action history and task state so far, for example: 1) robot arm moves to a position, 2) robot arm lowers, 3) robot arm grasps an object, 4) robot arm moves an object, 5) robot arm moves to another position, ...;\n"
+            "2) progress_summary: Based on the previous progress_summary, incrementally extend it using facts from the current frame_summary to summarize the robot arm’s action history and task status so far (e.g., 1. moves to a position, 2. descends, 3. grasps an object, 4. moves the object, 5. moves to another position...);\nNote that the added content must be consistent with frame_summary and should not simply restate it.\n"
             "3) decision: make a completion-state judgment.\n\n"
+            "Reminder: Follow the global anti-hallucination constraints provided at the initial stage; prioritize facts, prohibit speculation, use incremental updates, handle viewpoint conflicts conservatively, respect visibility thresholds, and adhere to the rules for writing decision.reason as well as the few-shot examples.\n\n"
             "Output format (strict):\n"
             "You must output strict JSON and only include the following top-level fields:\n"
             "- frame_summary\n"
@@ -513,15 +515,15 @@ def build_keyframe_vlm_prompt(
         )
 
     return (
-        # f"{base_prompt}\n\n"
         "当前阶段：keyframe_update（关键帧增量更新）\n"
         "- 这是下一帧输入；\n"
         f"- 与上一帧间隔约为 {interval_text}；\n"
         f"- 当前正在进行的任务是：{task_name}\n\n"
         "你需要根据你的角色目标，基于当前帧的图像和会话记录，进行如下总结：\n"
         "1) frame_summary：针对任务目标对图像状态进行描述总结，关注机械臂的状态和动作，回答机械臂夹爪在图像中的像素坐标，关注目标物体位置和状态；\n"
-        "2) progress_summary：在上一次总结的progess_summary的基础上，追加式地总结目前为止机械臂的动作历史和任务状态，输出比如：1.机械臂移动至某位置，2.机械臂下探，3.机械臂抓取某物体，4.机械臂移动某物体，5.机械臂移动至某位置......\n"
+        "2) progress_summary：在上一次总结的progess_summary的基础上，根据当前frame_summary的事实，追加式地总结目前为止机械臂的动作历史和任务状态，输出比如：1.机械臂移动至某位置，2.机械臂下探，3.机械臂抓取某物体，4.机械臂移动某物体，5.机械臂移动至某位置......\n注意：追加的内容需要与frame_summary的事实保持一致，避免简单续写frame_summary。\n"
         "3) decision：进行任务完成状态判定。\n\n"
+        "提醒：遵守起始阶段给出的全局抗幻觉硬约束；事实优先，禁止脑补，增量追加，视角冲突保守，可见性门槛，decision.reason的编写规则，以及few-shot示例\n\n"
         "输出格式（严格）：\n"
         "你必须输出严格 JSON，且只能包含以下顶层字段：\n"
         "- frame_summary\n"
