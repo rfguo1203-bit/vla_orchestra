@@ -480,8 +480,14 @@ def build_keyframe_vlm_prompt(
     frame_interval_seconds: float | None = None,
     prompt_version: str = "v1",
     prompt_language: str = "zh",
+    keyframe_index: int | None = None,
 ) -> str:
     normalized_language = (prompt_language or "zh").strip().lower()
+    should_inject_base_prompt = bool(base_prompt and base_prompt.strip()) and (
+        keyframe_index is None
+        or (isinstance(keyframe_index, int) and keyframe_index > 0 and keyframe_index % 4 == 0)
+    )
+    base_prompt_prefix = f"{base_prompt}\n\n" if should_inject_base_prompt else ""
     interval_text = (
         f"{frame_interval_seconds:.2f} seconds"
         if normalized_language == "en"
@@ -496,7 +502,7 @@ def build_keyframe_vlm_prompt(
     )
     if normalized_language == "en":
         return (
-            f"{base_prompt}\n\n"
+            f"{base_prompt_prefix}"
             "Current phase: keyframe_update (incremental keyframe update)\n"
             "- This is the next frame input;\n"
             f"- The interval from the previous frame is about {interval_text};\n"
@@ -515,6 +521,7 @@ def build_keyframe_vlm_prompt(
         )
 
     return (
+        f"{base_prompt_prefix}"
         "当前阶段：keyframe_update（关键帧增量更新）\n"
         "- 这是下一帧输入；\n"
         f"- 与上一帧间隔约为 {interval_text}；\n"

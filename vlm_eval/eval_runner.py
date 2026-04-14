@@ -87,6 +87,7 @@ class EpisodeState:
     memory_trace: list[dict[str, Any]]
     previous_keyframe_image: Any | None
     vlm_inference_frames: list[Any]
+    keyframe_vlm_count: int
 
 
 def _build_runtime(
@@ -208,6 +209,7 @@ def _build_episode_state() -> EpisodeState:
         memory_trace=[],
         previous_keyframe_image=None,
         vlm_inference_frames=[],
+        keyframe_vlm_count=0,
     )
 
 
@@ -386,6 +388,7 @@ def _run_keyframe_vlm_check(
         raise ValueError("Contextual VLM check requires obs['main_images'] to exist.")
     episode_state.vlm_inference_frames.append(copy.deepcopy(base_image))
     wrist_image = extract_wrist_image(obs) if vlm_include_wrist_image else None
+    episode_state.keyframe_vlm_count += 1
 
     estimated_frame_interval_seconds = float(vlm_check_interval / max(1.0, env_fps))
     effective_frame_interval_seconds = (
@@ -399,6 +402,7 @@ def _run_keyframe_vlm_check(
         frame_interval_seconds=effective_frame_interval_seconds,
         prompt_version=vlm_keyframe_prompt_version,
         prompt_language=vlm_prompt_lang,
+        keyframe_index=episode_state.keyframe_vlm_count,
     )
     error_message = ""
     try:
